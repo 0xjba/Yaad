@@ -31,3 +31,5 @@ Thumbs.db
 # Tauri
 src-tauri/target/
 
+# Embeddings Cache
+src-tauri/.fastembed_cache/
