@@ -1,0 +1,47 @@
+[package]
+name = "yaad"
+version = "0.1.0"
+description = "The Voice-Powered Memory Vault for macOS"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-shell = "2.0"
+tauri-plugin-positioner = { version = "2.0", features = ["tray-icon"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# The Database
+rusqlite = { version = "0.31", features = ["bundled", "uuid"] }
+# Vector Search
+sqlite-vec = "0.1.7-alpha.2"
+# Embeddings (CPU)
+fastembed = "4"
+# Transcription (Apple Silicon / GPU acceleration)
+# Metal is critical for GPU acceleration on macOS.
+whisper-rs = { version = "0.13", features = ["metal"] }
+# Audio capture - using cpal for cross-platform audio
+cpal = "0.15"
+# Audio resampling - for converting device sample rate to 16kHz for whisper
+rubato = "0.14"
+# UUID generation
+uuid = { version = "1.0", features = ["v4", "serde"] }
+# HTTP client for model downloads
+reqwest = { version = "0.11", features = ["stream"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["full"] }
+# Binary casting for sqlite-vec (f32 -> u8 conversion)
+bytemuck = "1.14"
+
+[features]
+# This feature is used for production builds or when `devPath` points to the filesystem
+# DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
+
