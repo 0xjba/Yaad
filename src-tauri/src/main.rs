@@ -22,6 +22,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(Mutex::new(commands::RecordingState {
             is_recording: false,
             start_time: None,
@@ -66,8 +67,8 @@ fn main() {
                         TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Down, .. } => {
                             let app = tray.app_handle();
                             if let Some(window) = app.get_webview_window("panel") {
-                                // 1. Resize (Exact 52px)
-                                let _ = window.set_size(Size::Logical(LogicalSize { width: 360.0, height: 52.0 }));
+                                // 1. Resize (Exact 44px)
+                                let _ = window.set_size(Size::Logical(LogicalSize { width: 320.0, height: 44.0 }));
                                 // 2. Position
                                 let _ = window.move_window(Position::TrayCenter);
                                 // 3. Show & Focus
@@ -85,7 +86,7 @@ fn main() {
                         TrayIconEvent::Click { button: MouseButton::Right, button_state: MouseButtonState::Down, .. } => {
                             let app = tray.app_handle();
                             if let Some(window) = app.get_webview_window("panel") {
-                                let _ = window.set_size(Size::Logical(LogicalSize { width: 360.0, height: 320.0 }));
+                                let _ = window.set_size(Size::Logical(LogicalSize { width: 320.0, height: 280.0 }));
                                 let _ = window.move_window(Position::TrayCenter);
                                 let _ = window.show();
                                 let _ = window.set_always_on_top(true);
@@ -105,7 +106,11 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(focused) = event {
-                if !focused { let _ = window.hide(); }
+                if !focused { 
+                    // Stop recording (discard) when focus is lost
+                    let _ = window.emit("window-blur", ());
+                    let _ = window.hide(); 
+                }
             }
         })
         .run(tauri::generate_context!())

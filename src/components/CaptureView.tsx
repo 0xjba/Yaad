@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Plus, Check, Loader2 } from 'lucide-react';
+import { X, Search, Plus, Check, Loader2, RotateCcw } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { AudioVisualizer } from './Visualizer';
 import { CaptureState } from '../types';
@@ -16,6 +16,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
   const [transcript, setTranscript] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isEditing, setIsEditing] = useState(false); // Track if user is editing
+  const [error, setError] = useState<string | null>(null);
   
   const recordingTimerRef = useRef<number | null>(null);
   const autosaveTimerRef = useRef<number | null>(null);
@@ -24,32 +25,59 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
   useEffect(() => {
     if (state === 'recording') {
         invoke('start_recording').catch(err => {
-            console.error(err);
-            setTranscript("Error: Mic not found");
-            setState('review');
+            console.error("Start recording failed:", err);
+            setError("Mic not found");
         });
         setIsEditing(false); // Reset edit state
+        setError(null);
     }
   }, [state, setState]);
 
   // Handle Stop & Process
   const handleProcess = async () => {
     setIsProcessing(true);
+    setError(null);
     try {
         const text = await invoke<string>('stop_recording');
         setTranscript(text);
-        setState('review');
+        setState('review'); // Only expand on success
     } catch (err) {
-        setTranscript(`Error: ${err}`);
-        setState('review');
+        let errorMessage = `Error: ${err}`;
+        try {
+            // Try to parse the error as JSON
+            const errorObj = JSON.parse(err as string);
+            if (errorObj.code === "AudioTooQuiet") {
+                errorMessage = "Couldn’t hear you. Retry.";
+            } else if (errorObj.code === "AudioTooShort") {
+                errorMessage = "Recording was too short.";
+            } else if (errorObj.message) {
+                errorMessage = errorObj.message;
+            }
+        } catch (e) {
+            // Parsing failed, use original error string
+            console.error("Failed to parse error JSON:", e);
+        }
+        
+        setError(errorMessage);
+        // 🚨 IMPORTANT: Do NOT call setState('review'). 
+        // This keeps the App in 'recording' state, maintaining the small Pill size.
     } finally {
         setIsProcessing(false);
     }
   };
 
+  const handleRetry = () => {
+      setError(null);
+      setTranscript('');
+      invoke('start_recording').catch(err => {
+          console.error("Retry failed:", err);
+          setError("Mic not found");
+      });
+  };
+
   // 1. Recording Safety Timer (30s limit)
   useEffect(() => {
-    if (state === 'recording') {
+    if (state === 'recording' && !error) {
         recordingTimerRef.current = window.setTimeout(() => {
             handleProcess();
         }, 29500);
@@ -57,7 +85,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
             if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
         };
     }
-  }, [state]);
+  }, [state, error]);
 
   // 2. Auto-Save Logic (10s)
   useEffect(() => {
@@ -92,8 +120,21 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (state === 'recording') {
-            if (e.key === 'Enter') handleProcess();
-            if (e.key === 'Escape') onDiscard();
+            if (e.key === 'Enter') {
+                if (error) handleRetry();
+                else handleProcess();
+            }
+            if (e.key === 'Escape') {
+                // Discard and CLOSE window
+                invoke('cancel_recording').catch(() => {});
+                // We don't call onDiscard() because that switches to recall view
+                // Instead, we invoke a command to hide window or just let blur handler do it?
+                // Actually, the prompt says "it should close the app as expected"
+                // The cleanest way is to hide the window directly.
+                import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+                    getCurrentWindow().hide();
+                });
+            }
         } else if (state === 'review') {
             if (e.key === 'Enter' && !e.shiftKey) onSave(transcript);
             if (e.key === 'Escape') onDiscard();
@@ -101,53 +142,80 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [state, transcript, onSave, onDiscard]);
+  }, [state, transcript, onSave, onDiscard, error]);
 
   return (
     <div className="flex flex-col h-full w-full">
       
       {/* Top Pill */}
-      <div className="h-[52px] w-full vibrancy panel-base rounded-xl flex items-center justify-between px-3 shrink-0 z-10 gap-3">
+      <div className="h-[44px] w-full vibrancy panel-base rounded-xl flex items-center justify-between px-3 shrink-0 z-10 gap-3">
            
-           <div className="flex items-center bg-black/20 rounded-lg p-1 border border-white/5 shrink-0 select-none">
-                 <div className="flex items-center justify-center w-7 h-7 bg-electric text-white rounded-md shadow-sm ring-1 ring-white/10">
-                     <Plus size={14} />
+           <div className="flex items-center bg-black/20 rounded-lg p-1 border border-white/10 shrink-0 select-none shadow-inner">
+                 <div className="flex items-center justify-center w-6 h-6 bg-electric text-white rounded-md shadow-sm ring-1 ring-white/10">
+                     <Plus size={13} />
                  </div>
                  <button 
                      onClick={onToggleView}
-                     className="flex items-center justify-center w-7 h-7 text-txt-tertiary hover:text-txt-secondary transition-colors"
+                     className="flex items-center justify-center w-6 h-6 text-txt-tertiary hover:text-txt-secondary transition-colors"
                  >
-                     <Search size={14} />
+                     <Search size={13} />
                  </button>
             </div>
 
-           <div className="flex-1 flex items-center justify-start h-full overflow-hidden">
-             {state === 'recording' ? (
+           <div className="flex-1 flex items-center justify-start h-full overflow-hidden mr-[-6px]">
+             {error ? (
+                // 🚨 Error Message in Pill
+                <div className="flex items-center text-red-400 text-xs font-medium tracking-tight pl-2 whitespace-nowrap overflow-hidden text-ellipsis animate-fade-in">
+                    {error}
+                </div>
+             ) : state === 'recording' ? (
                 <div className="flex items-center gap-3 w-full h-full">
                     <div className="h-full flex-1 flex items-center">
                         <AudioVisualizer isRecording={!isProcessing} />
                     </div>
                 </div>
              ) : (
-                <div className="flex items-center text-txt-tertiary text-sm font-medium pl-2">
-                    Review Memory
+                <div className="flex items-center text-txt-tertiary text-xs font-medium tracking-tight pl-2 whitespace-nowrap overflow-hidden text-ellipsis">
+                    Edit your thought or autosaving in 10s
                 </div>
              )}
            </div>
 
-           <div className="flex items-center gap-1 pl-2">
-               {state === 'recording' && (
+           <div className="flex items-center gap-1 pl-0">
+               {(state === 'recording' || error) && (
                    <>
-                    <button onClick={onDiscard} className="w-8 h-8 flex items-center justify-center rounded-md text-txt-tertiary hover:text-txt-primary hover:bg-white/10">
-                        <X size={16} />
-                    </button>
                     <button 
-                        onClick={handleProcess}
-                        disabled={isProcessing}
-                        className={`w-8 h-8 flex items-center justify-center rounded-md transition-all duration-300 bg-white/20 hover:bg-white/30 text-white shadow-md ${isProcessing ? 'cursor-wait' : ''}`}
+                        onClick={() => {
+                            // X button behavior: Discard and Close
+                            invoke('cancel_recording').catch(() => {});
+                            import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+                                getCurrentWindow().hide();
+                            });
+                        }} 
+                        className="w-7 h-7 flex items-center justify-center rounded-md text-txt-tertiary hover:text-txt-primary hover:bg-white/10"
                     >
-                        {isProcessing ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                        <X size={15} />
                     </button>
+                    
+                    {error ? (
+                        // 🚨 Retry Button
+                        <button 
+                            onClick={handleRetry}
+                            className="w-7 h-7 flex items-center justify-center rounded-md transition-all duration-300 bg-white/10 hover:bg-white/20 text-white"
+                            title="Retry"
+                        >
+                            <RotateCcw size={13} />
+                        </button>
+                    ) : (
+                        // Normal Process Button
+                        <button 
+                            onClick={handleProcess}
+                            disabled={isProcessing}
+                            className={`w-7 h-7 flex items-center justify-center rounded-md transition-all duration-300 bg-white/20 hover:bg-white/30 text-white ${isProcessing ? 'cursor-wait' : ''}`}
+                        >
+                            {isProcessing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                        </button>
+                    )}
                    </>
                )}
            </div>
@@ -169,7 +237,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                     />
                 </div>
                 {/* Footer */}
-                <div className="relative px-4 py-3 border-t border-glass-border flex items-center justify-end bg-black/20 text-xs font-medium overflow-hidden">
+                <div className="relative px-4 py-2 border-t border-glass-border flex items-center justify-end bg-black/20 text-xs font-medium overflow-hidden">
                     <div className="flex items-center gap-3 z-10 relative">
                         <button onClick={onDiscard} className="flex items-center gap-2 group cursor-pointer text-txt-secondary hover:text-txt-primary">
                             <span>Discard</span> <span className="bg-neutral-800 px-1.5 py-0.5 rounded border border-white/5 text-[10px]">Esc</span>

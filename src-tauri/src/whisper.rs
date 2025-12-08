@@ -14,7 +14,7 @@ const MAX_DURATION_SEC: u64 = 30;
 
 // --- COMMANDS ---
 enum AudioCommand {
-    Start,
+    Start(mpsc::Sender<Result<(), AppError>>), // Reply channel for start status
     Stop(mpsc::Sender<Result<String, AppError>>), // Reply channel for transcript
     Cancel,
 }
@@ -34,6 +34,7 @@ pub fn init_whisper(app_handle: AppHandle) -> Result<(), AppError> {
         let mut stream_handle: Option<cpal::Stream> = None;
         let mut audio_buffer: Vec<f32> = Vec::new();
         let mut device_sample_rate = 0u32;
+        let mut recording_start: Option<Instant> = None;
         
         // This thread owns the Whisper Context (lazy loaded)
         let mut whisper_ctx: Option<WhisperContext> = None;
@@ -43,116 +44,117 @@ pub fn init_whisper(app_handle: AppHandle) -> Result<(), AppError> {
 
         while let Ok(cmd) = rx.recv() {
             match cmd {
-                AudioCommand::Start => {
+                AudioCommand::Start(reply_tx) => {
                     // Cleanup previous state
                     stream_handle = None;
                     audio_buffer.clear();
                     if let Ok(mut b) = shared_buffer.lock() { b.clear(); }
 
-                    // 1. Setup Audio Input
-                    let host = cpal::default_host();
-                    let device = match host.default_input_device() {
-                        Some(d) => d,
-                        None => {
-                            eprintln!("No input device found");
-                            continue; 
-                        }, 
-                    };
+                    // WRAP SETUP IN A CLOSURE TO CATCH ERRORS EASILY
+                    let setup_result = (|| -> Result<cpal::Stream, AppError> {
+                        let host = cpal::default_host();
+                        
+                        // 1. Check Device
+                        let device = host.default_input_device()
+                            .ok_or_else(|| AppError::AudioDeviceNotFound("No input device found".into()))?;
 
-                    let config = match device.default_input_config() {
-                        Ok(c) => c,
-                        Err(e) => {
-                            eprintln!("Failed to get input config: {}", e);
-                            continue;
-                        },
-                    };
+                        // 2. Check Config (This is where your specific error happens)
+                        let config = device.default_input_config()
+                            .map_err(|e| AppError::AudioDeviceNotFound(format!("Failed to get input config: {}", e)))?;
 
-                    device_sample_rate = config.sample_rate().0;
+                        device_sample_rate = config.sample_rate().0;
+                        recording_start = Some(Instant::now());
 
-                    // 2. Build Stream
-                    let writer = shared_buffer.clone();
-                    let start_time = Instant::now();
-                    let app_handle_clone = app_handle.clone(); // Clone for callback
-                    
-                    let err_fn = |err| eprintln!("Stream error: {}", err);
-                    
-                    let stream_result = match config.sample_format() {
-                        SampleFormat::F32 => device.build_input_stream(
-                            &config.into(),
-                            move |data: &[f32], _| {
-                                // Duration check
-                                if start_time.elapsed().as_secs() >= MAX_DURATION_SEC {
-                                    return;
-                                }
-                                
-                                // Calculate RMS (Loudness) for visualization
-                                let sum_squares: f32 = data.iter().map(|s| s * s).sum();
-                                let rms = (sum_squares / data.len() as f32).sqrt();
-                                
-                                // Emit event (Fire and forget, don't block audio thread)
-                                let _ = app_handle_clone.emit("audio-level", rms);
+                        let writer = shared_buffer.clone();
+                        let evt_handle = app_handle.clone(); 
+                        
+                        let err_fn = |err| eprintln!("Stream error: {}", err);
+                        
+                        // 3. Build Stream
+                        let stream = match config.sample_format() {
+                            SampleFormat::F32 => device.build_input_stream(
+                                &config.into(),
+                                move |data: &[f32], _| {
+                                    if let Some(start) = recording_start {
+                                        if start.elapsed().as_secs() >= MAX_DURATION_SEC {
+                                            return;
+                                        }
+                                    }
 
-                                if let Ok(mut b) = writer.lock() { b.extend_from_slice(data); }
-                            },
-                            err_fn, None
-                        ),
-                        // Fallback for other formats
-                         SampleFormat::I16 => device.build_input_stream(
-                             &config.into(),
-                             move |data: &[i16], _| {
-                                if start_time.elapsed().as_secs() >= MAX_DURATION_SEC { return; }
-                                
-                                // Convert and Calc RMS on the fly
-                                let sum_squares: f32 = data.iter().map(|&s| {
-                                    let f = s as f32 / 32768.0;
-                                    f * f
-                                }).sum();
-                                let rms = (sum_squares / data.len() as f32).sqrt();
-                                let _ = app_handle_clone.emit("audio-level", rms);
+                                    let rms = (data.iter().map(|x| x * x).sum::<f32>() / data.len() as f32).sqrt();
+                                    let _ = evt_handle.emit("audio-level", rms);
+                                    if let Ok(mut b) = writer.lock() { b.extend_from_slice(data); }
+                                },
+                                err_fn, None
+                            ),
+                            SampleFormat::I16 => device.build_input_stream(
+                                &config.into(),
+                                move |data: &[i16], _| {
+                                    if let Some(start) = recording_start {
+                                        if start.elapsed().as_secs() >= MAX_DURATION_SEC {
+                                            return;
+                                        }
+                                    }
+                                    
+                                    let sum_squares: f32 = data.iter().map(|&s| {
+                                        let f = s as f32 / 32768.0;
+                                        f * f
+                                    }).sum();
+                                    let rms = (sum_squares / data.len() as f32).sqrt();
+                                    let _ = evt_handle.emit("audio-level", rms);
 
-                                if let Ok(mut b) = writer.lock() { 
-                                    b.extend(data.iter().map(|&s| s as f32 / 32768.0));
-                                }
-                             },
-                             err_fn, None
-                        ),
-                         SampleFormat::U16 => device.build_input_stream(
-                             &config.into(),
-                             move |data: &[u16], _| {
-                                if start_time.elapsed().as_secs() >= MAX_DURATION_SEC { return; }
-                                
-                                let sum_squares: f32 = data.iter().map(|&s| {
-                                    let f = (s as f32 / 32768.0) - 1.0;
-                                    f * f
-                                }).sum();
-                                let rms = (sum_squares / data.len() as f32).sqrt();
-                                let _ = app_handle_clone.emit("audio-level", rms);
+                                    if let Ok(mut b) = writer.lock() { 
+                                        b.extend(data.iter().map(|&s| s as f32 / 32768.0));
+                                    }
+                                },
+                                err_fn, None
+                            ),
+                            SampleFormat::U16 => device.build_input_stream(
+                                &config.into(),
+                                move |data: &[u16], _| {
+                                    if let Some(start) = recording_start {
+                                        if start.elapsed().as_secs() >= MAX_DURATION_SEC {
+                                            return;
+                                        }
+                                    }
+                                    
+                                    let sum_squares: f32 = data.iter().map(|&s| {
+                                        let f = (s as f32 / 32768.0) - 1.0;
+                                        f * f
+                                    }).sum();
+                                    let rms = (sum_squares / data.len() as f32).sqrt();
+                                    let _ = evt_handle.emit("audio-level", rms);
 
-                                if let Ok(mut b) = writer.lock() { 
-                                    b.extend(data.iter().map(|&s| (s as f32 / 32768.0) - 1.0));
-                                }
-                             },
-                             err_fn, None
-                        ),
-                        _ => {
-                            eprintln!("Unsupported sample format");
-                            continue;
-                        },
-                    };
+                                    if let Ok(mut b) = writer.lock() { 
+                                        b.extend(data.iter().map(|&s| (s as f32 / 32768.0) - 1.0));
+                                    }
+                                },
+                                err_fn, None
+                            ),
+                            _ => return Err(AppError::AudioDeviceNotFound("Unsupported sample format".into())),
+                        }.map_err(|e| AppError::AudioDeviceNotFound(e.to_string()))?;
 
-                    if let Ok(stream) = stream_result {
-                        if let Err(e) = stream.play() {
-                            eprintln!("Failed to start stream: {}", e);
-                        } else {
+                        // 4. Play Stream
+                        stream.play().map_err(|e| AppError::AudioDeviceNotFound(e.to_string()))?;
+                        
+                        Ok(stream)
+                    })();
+
+                    // HANDLE THE RESULT
+                    match setup_result {
+                        Ok(stream) => {
                             stream_handle = Some(stream);
+                            let _ = reply_tx.send(Ok(())); // Tell frontend: "Success!"
                         }
-                    } else if let Err(e) = stream_result {
-                        eprintln!("Failed to build stream: {}", e);
+                        Err(e) => {
+                            let _ = reply_tx.send(Err(e)); // Tell frontend: "Failed: No Mic!"
+                        }
                     }
                 }
                 AudioCommand::Stop(reply_tx) => {
                     // 1. Drop stream to stop recording
                     stream_handle = None; 
+                    recording_start = None;
 
                     // 2. Retrieve data
                     let raw_samples = if let Ok(mut b) = shared_buffer.lock() {
@@ -167,6 +169,7 @@ pub fn init_whisper(app_handle: AppHandle) -> Result<(), AppError> {
                 }
                 AudioCommand::Cancel => {
                     stream_handle = None;
+                    recording_start = None;
                     if let Ok(mut b) = shared_buffer.lock() { b.clear(); }
                 }
             }
@@ -199,8 +202,13 @@ pub fn verify_model_integrity(model_path: &std::path::Path) -> Result<bool, Box<
 }
 
 pub fn start_recording() -> Result<(), AppError> {
+    let (reply_tx, reply_rx) = mpsc::channel();
     let tx = AUDIO_TX.get().ok_or(AppError::Unknown("Audio system not started".into()))?.lock().unwrap();
-    tx.send(AudioCommand::Start).map_err(|_| AppError::AudioBusy("Audio thread dead".into()))?;
+    tx.send(AudioCommand::Start(reply_tx)).map_err(|_| AppError::AudioBusy("Audio thread dead".into()))?;
+    
+    // Wait for the background thread to confirm start
+    reply_rx.recv().map_err(|_| AppError::Unknown("Audio thread crashed".into()))??;
+    
     Ok(())
 }
 

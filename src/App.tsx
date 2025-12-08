@@ -11,10 +11,10 @@ export default function App() {
   const [captureState, setCaptureState] = useState<CaptureState>('recording');
   
   // --- EXACT DIMENSIONS (Synced with Main.rs) ---
-  const WINDOW_WIDTH = 360; 
-  const HEIGHT_PILL = 52;     // Exactly 52px
-  const HEIGHT_REVIEW = 220;  // 220px content
-  const HEIGHT_RECALL = 320;  // 320px content
+  const WINDOW_WIDTH = 320; 
+  const HEIGHT_PILL = 44;     // Exactly 44px
+  const HEIGHT_REVIEW = 200;  // 200px content
+  const HEIGHT_RECALL = 280;  // 280px content
 
   useEffect(() => {
     invoke('initialize_app').catch(console.error);
@@ -48,7 +48,7 @@ export default function App() {
 
   // --- LISTENERS ---
   useEffect(() => {
-    const unlisten = listen<string>('set-view', (event) => {
+    const unlistenView = listen<string>('set-view', (event) => {
       const newView = event.payload as ViewMode;
       if (newView === 'capture') {
         setCaptureState('recording');
@@ -57,7 +57,19 @@ export default function App() {
         setView('recall');
       }
     });
-    return () => { unlisten.then(f => f()); };
+    
+    // Handle window blur (user clicks outside)
+    const unlistenBlur = listen('window-blur', () => {
+        // Discard recording if it was in progress
+        invoke('cancel_recording').catch(() => {});
+        // Reset state so next open starts fresh
+        setCaptureState('recording'); 
+    });
+
+    return () => { 
+        unlistenView.then(f => f()); 
+        unlistenBlur.then(f => f());
+    };
   }, []);
 
   useEffect(() => {
@@ -83,9 +95,9 @@ export default function App() {
 
   const contentHeightClass = (() => {
       if (view === 'capture') {
-          return captureState === 'recording' ? 'h-[52px]' : 'h-[220px]';
+          return captureState === 'recording' ? 'h-[44px]' : 'h-[200px]';
       }
-      return 'h-[320px]';
+      return 'h-[280px]';
   })();
 
   return (

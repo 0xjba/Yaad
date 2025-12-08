@@ -39,6 +39,7 @@ futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
 # Binary casting for sqlite-vec (f32 -> u8 conversion)
 bytemuck = "1.14"
+tauri-plugin-clipboard-manager = "2.3.2"
 
 [features]
 # This feature is used for production builds or when `devPath` points to the filesystem

@@ -13,8 +13,8 @@
       {
         "label": "panel",
         "title": "Yaad",
-        "width": 360,
-        "height": 320,
+        "width": 320,
+        "height": 280,
         "resizable": true,
         "fullscreen": false,
         "visible": false,

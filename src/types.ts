@@ -15,3 +15,12 @@ export interface SearchResult {
     memory: Memory;
     similarity: number;
 }
+
+export interface MemoryItem {
+    id: string;
+    title: string;
+    preview: string;
+    timestamp: string;
+    type: string;
+    content: string;
+}
