@@ -32,12 +32,9 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
 
             const mapped: MemoryItem[] = raw.map((r) => ({
                 id: r.memory.id.toString(),
-                title: r.memory.content,
-                preview: r.memory.content, // Use content as preview for now
+                text: r.memory.content,
                 // Fix: Remove "about " prefix to keep timestamp short
                 timestamp: formatDistanceToNow(new Date(r.memory.created_at), { addSuffix: true }).replace('about ', ''),
-                type: 'note', // Default type
-                content: r.memory.context_note || ''
             }));
             setResults(mapped);
             setSelectedIndex(0); // Reset selection on new results
@@ -57,7 +54,7 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
     const item = results.find(r => r.id === expandedId);
     if (item) {
         try {
-            await writeText(item.title);
+            await writeText(item.text);
             setIsCopied(true);
         } catch (err) {
             console.error('Failed to copy text:', err);
@@ -172,7 +169,7 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                     >
                             <div className="flex justify-between items-start">
                                 <div className={`text-xs font-medium flex-1 ${isExpanded ? 'text-txt-primary whitespace-pre-wrap' : 'text-txt-secondary truncate'}`}>
-                                {item.title}
+                                {item.text}
                             </div>
                                 <span className="text-[10px] text-txt-tertiary whitespace-nowrap ml-2 shrink-0 pt-0.5">
                                 {item.timestamp}
