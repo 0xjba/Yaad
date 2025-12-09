@@ -39,6 +39,11 @@ fn main() {
             commands::initialize_app
         ])
         .setup(|app| {
+            // ✅ Set to Prohibited early (applicationWillFinishLaunching phase)
+            // Prevents dock icon flash and focus stealing during startup
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Prohibited);
+            
             let app_data_dir = app.path().app_local_data_dir().unwrap();
             db::set_app_data_dir(app_data_dir).unwrap();
             db::init_db().unwrap();
@@ -47,13 +52,13 @@ fn main() {
             if let Some(window) = app.get_webview_window("panel") {
                 // Allow shrinking to 1px
                 let _ = window.set_min_size(Some(Size::Logical(LogicalSize { width: 300.0, height: 1.0 })));
+                
+                // ✅ CONVENTIONAL WAY: Disable shadow once at startup
+                let _ = window.set_shadow(false);
             }
 
             std::thread::spawn(|| { let _ = embeddings::init_embedder(); });
             if let Err(e) = whisper::init_whisper(app.handle().clone()) { eprintln!("Whisper init error: {}", e); }
-            
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             
             let default_icon = app.default_window_icon().unwrap().clone();
             
@@ -75,8 +80,6 @@ fn main() {
                                 let _ = window.show();
                                 let _ = window.set_always_on_top(true);
                                 let _ = window.set_focus();
-                                // 4. KILL SHADOW LAST (Fixes artifact)
-                                let _ = window.set_shadow(false);
                                 
                                 thread::sleep(Duration::from_millis(50));
                                 let _ = window.emit("set-view", "capture");
@@ -91,7 +94,6 @@ fn main() {
                                 let _ = window.show();
                                 let _ = window.set_always_on_top(true);
                                 let _ = window.set_focus();
-                                let _ = window.set_shadow(false); // Kill shadow last
                                 
                                 thread::sleep(Duration::from_millis(50));
                                 let _ = window.emit("set-view", "recall");
@@ -101,6 +103,10 @@ fn main() {
                     }
                 })
                 .build(app)?;
+            
+            // ✅ Switch to Accessory after launch completes (applicationDidFinishLaunching phase)
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             
             Ok(())
         })
