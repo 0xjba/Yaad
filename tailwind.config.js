@@ -1,5 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  // 1. Enable system-based dark mode
+  darkMode: 'media', 
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -7,15 +9,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        electric: '#FFC531', 
+        electric: 'var(--color-electric)',
         glass: {
-          border: 'rgba(255, 255, 255, 0.08)', 
-          surface: 'rgba(20, 20, 20, 0.70)', 
+          border: 'var(--color-glass-border)', 
+          surface: 'var(--color-glass-surface)', 
         },
         txt: {
-          primary: '#FFFFFF',
-          secondary: 'rgba(255, 255, 255, 0.65)', 
-          tertiary: 'rgba(255, 255, 255, 0.4)',
+          primary: 'var(--color-txt-primary)',
+          secondary: 'var(--color-txt-secondary)', 
+          tertiary: 'var(--color-txt-tertiary)',
         }
       },
       animation: {

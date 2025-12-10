@@ -121,7 +121,7 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
     <div className="flex flex-col h-full w-full">
       {/* Top Pill */}
       <div className="h-[44px] w-full vibrancy panel-base rounded-xl flex items-center px-3 shrink-0 z-10 gap-3">
-        <div className="flex items-center bg-black/20 rounded-lg p-1 border border-white/10 shrink-0 select-none shadow-inner">
+        <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-lg p-1 border border-black/10 dark:border-white/10 shrink-0 select-none shadow-inner">
              <button onClick={onToggleView} className="flex items-center justify-center w-6 h-6 text-txt-tertiary hover:text-txt-secondary transition-colors">
                  <Plus size={13} />
              </button>
@@ -159,7 +159,7 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                     <div 
                         key={item.id}
                         className={`relative flex flex-col rounded-lg cursor-pointer transition-all duration-200 mb-1 px-3 py-2 ${
-                                isSelected ? 'bg-white/10' : 'hover:bg-white/5'
+                                isSelected ? 'bg-black/10 dark:bg-white/10' : 'hover:bg-black/5 dark:hover:bg-white/5'
                         }`}
                             onClick={() => {
                                 setSelectedIndex(index);
@@ -181,24 +181,24 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
             )}
           </div>
           {/* Footer */}
-          <div className="px-4 py-2 border-t border-glass-border flex items-center justify-between bg-black/20 text-xs font-medium shrink-0">
+          <div className="px-4 py-2 border-t border-glass-border flex items-center justify-between bg-black/5 dark:bg-black/20 text-xs font-medium shrink-0">
              <span className="text-txt-tertiary">{results.length} items</span>
              
              {expandedId !== null ? (
                  <div 
                     className={`flex items-center gap-2 cursor-pointer transition-colors ${
-                        isCopied ? 'text-txt-primary' : 'text-txt-secondary hover:text-white'
+                        isCopied ? 'text-txt-primary' : 'text-txt-secondary hover:text-txt-primary'
                     }`}
                     onClick={handleCopy}
                  >
                     <span>{isCopied ? 'Copied' : 'Copy'}</span> 
-                    <span className="bg-neutral-800 p-0.5 rounded border border-white/5 text-[10px]">
+                    <span className="bg-neutral-200 dark:bg-neutral-800 p-0.5 rounded border border-black/5 dark:border-white/5 text-[10px]">
                         {isCopied ? <Check size={10} /> : <Copy size={10} />}
                     </span>
                  </div>
              ) : (
              <div className="flex items-center gap-2 text-txt-secondary">
-                <span>Select</span> <span className="bg-neutral-800 px-1.5 py-0.5 rounded border border-white/5 text-[10px]">↵</span>
+                <span>Select</span> <span className="bg-neutral-200 dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-black/5 dark:border-white/5 text-[10px]">↵</span>
              </div>
              )}
           </div>

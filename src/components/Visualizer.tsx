@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
 export const AudioVisualizer: React.FC<{ isRecording: boolean }> = ({ isRecording }) => {
@@ -9,6 +9,20 @@ export const AudioVisualizer: React.FC<{ isRecording: boolean }> = ({ isRecordin
   const amplitudeRef = useRef(0);
   // Ref for smooth transition (Linear Interpolation)
   const smoothedRef = useRef(0);
+
+  // 1. State to track dark mode for Canvas
+  const [isDarkMode, setIsDarkMode] = useState(
+    window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+  );
+
+  // 2. Listen for system theme changes
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
+    
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
 
   // Listen for audio-level events from Rust
   useEffect(() => {
@@ -69,15 +83,20 @@ export const AudioVisualizer: React.FC<{ isRecording: boolean }> = ({ isRecordin
       ctx.clearRect(0, 0, width, height);
       
       ctx.beginPath();
-      // CHANGE THIS: Use a slight white-gray color
-      ctx.strokeStyle = '#E0E0E0'; 
+      // 3. DYNAMIC COLORS based on state
+      // Dark Mode: Light stroke (#E0E0E0), Light glow
+      // Light Mode: Dark stroke (#333333), Darker/subtle glow
+      if (isDarkMode) {
+          ctx.strokeStyle = '#E0E0E0';
+          ctx.shadowColor = 'rgba(255, 255, 255, 0.4)';
+      } else {
+          ctx.strokeStyle = '#333333'; 
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.2)'; 
+      }
       ctx.lineWidth = 2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      
-      // CHANGE THIS: Glow color should match but be transparent
-      ctx.shadowBlur = 15; // Increased glow
-      ctx.shadowColor = 'rgba(255, 255, 255, 0.4)'; // White at 40% opacity
+      ctx.shadowBlur = 15;
 
       if (isRecording) {
         // Linear Interpolation (Lerp) for smoothness
@@ -126,7 +145,7 @@ export const AudioVisualizer: React.FC<{ isRecording: boolean }> = ({ isRecordin
       window.removeEventListener('resize', updateSize);
       cancelAnimationFrame(animationId);
     };
-  }, [isRecording]);
+  }, [isRecording, isDarkMode]); // 4. Add isDarkMode to dependency array
 
   return (
     <div ref={containerRef} className="w-full h-full flex items-center justify-center overflow-hidden">

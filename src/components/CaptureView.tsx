@@ -150,7 +150,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
       {/* Top Pill */}
       <div className="h-[44px] w-full vibrancy panel-base rounded-xl flex items-center justify-between px-3 shrink-0 z-10 gap-3">
            
-           <div className="flex items-center bg-black/20 rounded-lg p-1 border border-white/10 shrink-0 select-none shadow-inner">
+           <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-lg p-1 border border-black/10 dark:border-white/10 shrink-0 select-none shadow-inner">
                  <div className="flex items-center justify-center w-6 h-6 bg-electric text-white rounded-md shadow-sm ring-1 ring-white/10">
                      <Plus size={13} />
                  </div>
@@ -192,7 +192,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                                 getCurrentWindow().hide();
                             });
                         }} 
-                        className="w-7 h-7 flex items-center justify-center rounded-md text-txt-tertiary hover:text-txt-primary hover:bg-white/10"
+                        className="w-7 h-7 flex items-center justify-center rounded-md text-txt-tertiary hover:text-txt-primary hover:bg-black/10 dark:hover:bg-white/10"
                     >
                         <X size={15} />
                     </button>
@@ -201,7 +201,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                         // 🚨 Retry Button
                         <button 
                             onClick={handleRetry}
-                            className="w-7 h-7 flex items-center justify-center rounded-md transition-all duration-300 bg-white/10 hover:bg-white/20 text-white"
+                            className="w-7 h-7 flex items-center justify-center rounded-md transition-all duration-300 bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 text-white"
                             title="Retry"
                         >
                             <RotateCcw size={13} />
@@ -211,7 +211,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                         <button 
                             onClick={handleProcess}
                             disabled={isProcessing}
-                            className={`w-7 h-7 flex items-center justify-center rounded-md transition-all duration-300 bg-white/20 hover:bg-white/30 text-white ${isProcessing ? 'cursor-wait' : ''}`}
+                            className={`w-7 h-7 flex items-center justify-center rounded-md transition-all duration-300 bg-black/20 dark:bg-white/20 hover:bg-black/30 dark:hover:bg-white/30 text-white ${isProcessing ? 'cursor-wait' : ''}`}
                         >
                             {isProcessing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                         </button>
@@ -237,14 +237,14 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                     />
                 </div>
                 {/* Footer */}
-                <div className="relative px-4 py-2 border-t border-glass-border flex items-center justify-end bg-black/20 text-xs font-medium overflow-hidden">
+                <div className="relative px-4 py-2 border-t border-glass-border flex items-center justify-end bg-black/5 dark:bg-black/20 text-xs font-medium overflow-hidden">
                     <div className="flex items-center gap-3 z-10 relative">
                         <button onClick={onDiscard} className="flex items-center gap-2 group cursor-pointer text-txt-secondary hover:text-txt-primary">
-                            <span>Discard</span> <span className="bg-neutral-800 px-1.5 py-0.5 rounded border border-white/5 text-[10px]">Esc</span>
+                            <span>Discard</span> <span className="bg-neutral-200 dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-black/5 dark:border-white/5 text-[10px]">Esc</span>
                         </button>
-                        <div className="w-px h-3 bg-white/10 mx-1"></div>
+                        <div className="w-px h-3 bg-black/10 dark:bg-white/10 mx-1"></div>
                         <button onClick={() => onSave(transcript)} className="flex items-center gap-2 group cursor-pointer text-txt-secondary hover:text-txt-primary">
-                            <span>Save</span> <span className="bg-neutral-800 px-1.5 py-0.5 rounded border border-white/5 text-[10px]">↵</span>
+                            <span>Save</span> <span className="bg-neutral-200 dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-black/5 dark:border-white/5 text-[10px]">↵</span>
                         </button>
                     </div>
                     
