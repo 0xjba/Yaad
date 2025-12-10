@@ -6,7 +6,7 @@ interface FirstRunProps {
 
 const FirstRun: React.FC<FirstRunProps> = ({ onComplete }) => {
   return (
-    <div className="h-full w-full bg-white/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 text-center">
+    <div className="h-full w-full bg-white/95 flex flex-col items-center justify-center p-8 text-center">
       <div className="mb-6">
         <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4">
           👋

@@ -15,13 +15,12 @@ html, body, #root {
 
 /* --- RAYCAST AESTHETIC (SHADOWLESS) --- */
 .vibrancy {
-  /* 1. Glass Transparency */
-  background-color: rgba(10, 10, 10, 0.30); 
+  /* 1. Glass Transparency - High opacity to block background text (no blur) */
+  background-color: rgba(10, 10, 10, 0.98); 
+  opacity: 1.0;
   
-  /* 2. Texture & Blur */
+  /* 2. Texture (No Blur) */
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.08'/%3E%3C/svg%3E");
-  backdrop-filter: blur(15px) saturate(180%);
-  -webkit-backdrop-filter: blur(15px) saturate(180%);
   
   /* 3. BORDER ONLY (No Drop Shadow) */
   /* This creates a sharp 1px glass edge definition */
