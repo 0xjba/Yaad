@@ -4,6 +4,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { formatDistanceToNow } from 'date-fns';
 import { MemoryItem, SearchResult } from '../types';
+import { PillContainer } from './ui/PillContainer';
+import { IconButton } from './ui/IconButton';
+import { KeyboardBadge } from './ui/KeyboardBadge';
 
 interface RecallViewProps {
   onEscape: () => void;
@@ -120,14 +123,10 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
   return (
     <div className="flex flex-col h-full w-full">
       {/* Top Pill */}
-      <div className="h-[44px] w-full vibrancy panel-base rounded-xl flex items-center px-3 shrink-0 z-10 gap-3">
+      <PillContainer>
         <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-lg p-1 border border-black/10 dark:border-white/10 shrink-0 select-none shadow-inner">
-             <button onClick={onToggleView} className="flex items-center justify-center w-6 h-6 text-txt-tertiary hover:text-txt-secondary transition-colors">
-                 <Plus size={13} />
-             </button>
-             <div className="flex items-center justify-center w-6 h-6 bg-electric text-white rounded-md shadow-sm ring-1 ring-white/10">
-                 <Search size={13} />
-             </div>
+             <IconButton variant="ghost" onClick={onToggleView} icon={<Plus size={13} />} />
+             <IconButton variant="primary" icon={<Search size={13} />} />
         </div>
         <input 
           autoFocus
@@ -137,7 +136,7 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-      </div>
+      </PillContainer>
 
       <div className="h-3 shrink-0"></div>
 
@@ -192,13 +191,13 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                     onClick={handleCopy}
                  >
                     <span>{isCopied ? 'Copied' : 'Copy'}</span> 
-                    <span className="bg-neutral-200 dark:bg-neutral-800 p-0.5 rounded border border-black/5 dark:border-white/5 text-[10px]">
+                    <KeyboardBadge>
                         {isCopied ? <Check size={10} /> : <Copy size={10} />}
-                    </span>
+                    </KeyboardBadge>
                  </div>
              ) : (
              <div className="flex items-center gap-2 text-txt-secondary">
-                <span>Select</span> <span className="bg-neutral-200 dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-black/5 dark:border-white/5 text-[10px]">↵</span>
+                <span>Select</span> <KeyboardBadge>↵</KeyboardBadge>
              </div>
              )}
           </div>

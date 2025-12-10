@@ -5,16 +5,11 @@ import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { RecallView } from './components/RecallView';
 import { CaptureView } from './components/CaptureView';
 import { ViewMode, CaptureState } from './types';
+import { WINDOW_WIDTH, HEIGHT_PILL, HEIGHT_REVIEW, HEIGHT_RECALL } from './constants';
 
 export default function App() {
   const [view, setView] = useState<ViewMode | null>(null);
   const [captureState, setCaptureState] = useState<CaptureState>('recording');
-  
-  // --- EXACT DIMENSIONS (Synced with Main.rs) ---
-  const WINDOW_WIDTH = 320; 
-  const HEIGHT_PILL = 44;     // Exactly 44px
-  const HEIGHT_REVIEW = 200;  // 200px content
-  const HEIGHT_RECALL = 280;  // 280px content
 
   useEffect(() => {
     invoke('initialize_app').catch(console.error);
@@ -95,9 +90,9 @@ export default function App() {
 
   const contentHeightClass = (() => {
       if (view === 'capture') {
-          return captureState === 'recording' ? 'h-[44px]' : 'h-[200px]';
+          return captureState === 'recording' ? 'h-pill' : 'h-review';
       }
-      return 'h-[280px]';
+      return 'h-recall';
   })();
 
   return (

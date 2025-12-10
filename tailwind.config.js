@@ -20,6 +20,21 @@ export default {
           tertiary: 'var(--color-txt-tertiary)',
         }
       },
+      height: {
+        'pill': '44px',    // Pill container height
+        'review': '200px', // Review panel height
+        'recall': '280px', // Recall panel height
+      },
+      spacing: {
+        'pill': '44px',
+        'review': '200px',
+        'recall': '280px',
+      },
+      zIndex: {
+        'glass': '10',      // Glass effects and panels
+        'overlay': '20',    // Overlays like progress bars
+        'modal': '30',      // Modals (if needed in future)
+      },
       animation: {
         'slide-down': 'slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
         'fade-in': 'fadeIn 0.2s ease-out',

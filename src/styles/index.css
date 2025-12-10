@@ -5,7 +5,7 @@
 /* --- THEME VARIABLES --- */
 :root {
   /* LIGHT MODE (Default) */
-  --color-electric: #FFC531;
+  --color-electric: #00FF9D;
   
   /* Text: Dark grey/black for light backgrounds */
   --color-txt-primary: #1a1a1a;
@@ -25,7 +25,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     /* DARK MODE (Matches your original hardcoded values) */
-    --color-electric: #FFC531;
+    --color-electric: #00FF9D;
     /* Text: White for dark backgrounds */
     --color-txt-primary: #FFFFFF;
     --color-txt-secondary: rgba(255, 255, 255, 0.65);
