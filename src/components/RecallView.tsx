@@ -84,6 +84,10 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                 setResults([]);
             } else {
                 onEscape();
+                // Hide window like in CaptureView
+                import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+                    getCurrentWindow().hide();
+                });
             }
             return;
         }

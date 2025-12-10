@@ -42,6 +42,8 @@ export default {
         'countdown': 'countdown 59s linear forwards', 
         // 🚨 NEW: Auto-save timer (10s)
         'autosave': 'countdown 10s linear forwards',
+        // 🚨 NEW: Recording limit timer (30s)
+        'recording-limit': 'countdown 30s linear forwards',
       },
       keyframes: {
         slideDown: {

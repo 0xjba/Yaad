@@ -10,6 +10,7 @@ import { WINDOW_WIDTH, HEIGHT_PILL, HEIGHT_REVIEW, HEIGHT_RECALL } from './const
 export default function App() {
   const [view, setView] = useState<ViewMode | null>(null);
   const [captureState, setCaptureState] = useState<CaptureState>('recording');
+  const [captureSessionId, setCaptureSessionId] = useState(0);
 
   useEffect(() => {
     invoke('initialize_app').catch(console.error);
@@ -48,6 +49,7 @@ export default function App() {
       if (newView === 'capture') {
         setCaptureState('recording');
         setView('capture');
+        setCaptureSessionId(id => id + 1);
       } else {
         setView('recall');
       }
@@ -80,6 +82,7 @@ export default function App() {
           setCaptureState('recording');
           invoke('cancel_recording').catch(() => {});
           setView('capture');
+          setCaptureSessionId(id => id + 1);
       } else {
           setView('recall');
       }
@@ -107,6 +110,7 @@ export default function App() {
                 />
             ) : (
                 <CaptureView 
+                    key={captureSessionId}
                     state={captureState}
                     setState={setCaptureState}
                     onDiscard={() => {

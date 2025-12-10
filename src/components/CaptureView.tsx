@@ -60,7 +60,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
     <div className="flex flex-col h-full w-full">
       
       {/* Top Pill */}
-      <PillContainer className="justify-between">
+      <PillContainer className="justify-between relative overflow-hidden">
            <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-lg p-1 border border-black/10 dark:border-white/10 shrink-0 select-none shadow-inner">
                  <IconButton variant="primary" icon={<Plus size={13} />} />
                  <IconButton variant="ghost" onClick={onToggleView} icon={<Search size={13} />} />
@@ -123,6 +123,14 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                    </>
                )}
            </div>
+
+           {/* 🚨 Recording Timer Line */}
+           {state === 'recording' && !error && (
+               <div 
+                   className="absolute bottom-0 left-0 h-[2px] w-full animate-recording-limit z-overlay" 
+                   style={{ backgroundColor: '#00FF9D', opacity: 0.8 }}
+               />
+           )}
       </PillContainer>
 
       {/* Review Card */}
@@ -156,7 +164,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                     {/* Explicit style overrides to ensure visibility */}
                     {!isEditing && (
                         <div 
-                            className="absolute bottom-0 left-0 h-[3px] w-full animate-autosave z-overlay" 
+                            className="absolute bottom-0 left-0 h-[2px] w-full animate-autosave z-overlay" 
                             style={{ backgroundColor: '#00FF9D', opacity: 0.8 }}
                         />
                     )}
