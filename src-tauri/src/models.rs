@@ -9,6 +9,8 @@ use tauri::{AppHandle, Emitter};
 pub const WHISPER_MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin";
 pub const WHISPER_MODEL_FILENAME: &str = "ggml-small.en.bin";
 const EMBEDDING_MODEL_URL: &str = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quantized.onnx";
+pub const CLIP_MODEL_URL: &str = "https://huggingface.co/Xenova/tiny-clip-roberta-tiny-vit-5M-224/resolve/main/onnx/vision_model_quantized.onnx";
+pub const CLIP_MODEL_FILENAME: &str = "clip_vision_quantized.onnx";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DownloadProgress {
@@ -149,6 +151,12 @@ pub async fn download_models() -> Result<(), Box<dyn std::error::Error>> {
     let embedding_path = models_dir.join("model_quantized.onnx");
     if !embedding_path.exists() {
         download_file(EMBEDDING_MODEL_URL, &embedding_path).await?;
+    }
+
+    // Download CLIP Model (ONNX)
+    let clip_path = models_dir.join(CLIP_MODEL_FILENAME);
+    if !clip_path.exists() {
+        download_file(CLIP_MODEL_URL, &clip_path).await?;
     }
     
     Ok(())

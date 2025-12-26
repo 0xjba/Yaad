@@ -7,10 +7,10 @@ license = ""
 repository = ""
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
+# REQUIRED: This allows build.rs to access 'SwiftLinker'
+swift-rs = "1.0.7"
 
 [dependencies]
 tauri = { version = "2.0", features = ["macos-private-api", "tray-icon", "image-png"] }
@@ -18,31 +18,38 @@ tauri-plugin-shell = "2.0"
 tauri-plugin-positioner = { version = "2.0", features = ["tray-icon"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# --- New Dependencies for "The Eyes" ---
+swift-rs = "1.0.7"  # For runtime types (SRString, etc.)
+image = "0.25.5"    # For handling screenshots
+base64 = "0.22"     # For encoding images to send to frontend
+ort = { version = "2.0.0-rc.9", features = ["coreml", "half"] } # CLIP and OCR models
+anyhow = "1.0"      # Error handling
+regex = "1.11"      # Regex for intent scoring
+# ---------------------------------------
+
 # The Database
 rusqlite = { version = "0.31", features = ["bundled", "uuid"] }
 # Vector Search
 sqlite-vec = "0.1.7-alpha.2"
 # Embeddings (CPU)
 fastembed = "4"
-# Transcription (Apple Silicon / GPU acceleration)
-# Metal is critical for GPU acceleration on macOS.
+# Transcription
 whisper-rs = { version = "0.13", features = ["metal"] }
-# Audio capture - using cpal for cross-platform audio
+# Audio capture
 cpal = "0.15"
-# Audio resampling - for converting device sample rate to 16kHz for whisper
+# Audio resampling
 rubato = "0.14"
 # UUID generation
 uuid = { version = "1.0", features = ["v4", "serde"] }
-# HTTP client for model downloads
+# HTTP client
 reqwest = { version = "0.11", features = ["stream"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["full"] }
-# Binary casting for sqlite-vec (f32 -> u8 conversion)
 bytemuck = "1.14"
 tauri-plugin-clipboard-manager = "2.3.2"
+tauri-plugin-fs = "2.0"
+once_cell = "1.19"
 
 [features]
-# This feature is used for production builds or when `devPath` points to the filesystem
-# DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]
-

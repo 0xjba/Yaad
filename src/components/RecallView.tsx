@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Plus, Copy, Check } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { appLocalDataDir, join } from '@tauri-apps/api/path';
+import { readFile } from '@tauri-apps/plugin-fs'; // <--- Critical Import
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { formatDistanceToNow } from 'date-fns';
 import { MemoryItem, SearchResult } from '../types';
@@ -13,14 +15,82 @@ interface RecallViewProps {
   onToggleView: () => void;
 }
 
+// --- NEW COMPONENT: Safely loads images using the FS plugin ---
+const ImageThumbnail = ({ 
+  dir, 
+  path, 
+  className 
+}: { 
+  dir: string; 
+  path: string; 
+  className?: string 
+}) => {
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const fullPath = await join(dir, path);
+        // This works because you allowed "$APP_DATA/screenshots/*" in default.json
+        const bytes = await readFile(fullPath); 
+        // Create a blob URL (efficient/fast)
+        const blob = new Blob([bytes], { type: 'image/jpeg' });
+        const url = URL.createObjectURL(blob);
+        if (active) setSrc(url);
+      } catch (err) {
+        console.error("Failed to load image:", err);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+      if (src) URL.revokeObjectURL(src);
+    };
+  }, [dir, path]);
+
+  if (!src) return <div className="w-full h-full bg-black/5 animate-pulse" />;
+  
+  return <img src={src} alt="Context" className={className} />;
+};
+// -------------------------------------------------------------
+
 export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MemoryItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
+  const [isSuggested, setIsSuggested] = useState(false);
+  const [screenshotDir, setScreenshotDir] = useState<string | null>(null);
+
+  useEffect(() => {
+    appLocalDataDir().then(dir => {
+        join(dir, 'screenshots').then(setScreenshotDir);
+    });
+  }, []);
   
-  // Real Search
+  useEffect(() => {
+    if (!query.trim()) {
+        invoke<SearchResult[]>('get_contextual_suggestions')
+            .then(raw => {
+                if (raw.length > 0) {
+                    const mapped: MemoryItem[] = raw.map((r) => ({
+                        id: r.memory.id.toString(),
+                        text: r.memory.content,
+                        timestamp: formatDistanceToNow(new Date(r.memory.created_at), { addSuffix: true }).replace('about ', ''),
+                        screenshotPath: r.memory.screenshot_path,
+                    }));
+                    setResults(mapped);
+                    setIsSuggested(true);
+                }
+            })
+            .catch(console.error);
+    } else {
+        setIsSuggested(false);
+    }
+  }, [query]);
+
   useEffect(() => {
     let isActive = true;
     const doSearch = async () => {
@@ -29,24 +99,23 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
             return;
         }
         try {
-            // Rust returns { memory: {id, content, ...}, similarity: 0.9 }
             const raw = await invoke<SearchResult[]>('search_memories', { query, limit: 5 });
             if (!isActive) return;
 
             const mapped: MemoryItem[] = raw.map((r) => ({
                 id: r.memory.id.toString(),
                 text: r.memory.content,
-                // Fix: Remove "about " prefix to keep timestamp short
                 timestamp: formatDistanceToNow(new Date(r.memory.created_at), { addSuffix: true }).replace('about ', ''),
+                screenshotPath: r.memory.screenshot_path,
             }));
             setResults(mapped);
-            setSelectedIndex(0); // Reset selection on new results
+            setSelectedIndex(0);
             setIsCopied(false);
         } catch (e) {
             console.error(e);
         }
     };
-    const timer = setTimeout(doSearch, 150); // Debounce
+    const timer = setTimeout(doSearch, 150);
     return () => {
         isActive = false;
         clearTimeout(timer);
@@ -72,7 +141,6 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
     }
   };
 
-  // Keyboard Navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -84,7 +152,6 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                 setResults([]);
             } else {
                 onEscape();
-                // Hide window like in CaptureView
                 import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
                     getCurrentWindow().hide();
                 });
@@ -126,7 +193,6 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
 
   return (
     <div className="flex flex-col h-full w-full">
-      {/* Top Pill */}
       <PillContainer>
         <div className="flex items-center bg-black/5 dark:bg-black/20 rounded-lg p-1 border border-black/10 dark:border-white/10 shrink-0 select-none shadow-inner">
              <IconButton variant="ghost" onClick={onToggleView} icon={<Plus size={13} />} />
@@ -144,7 +210,6 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
 
       <div className="h-3 shrink-0"></div>
 
-      {/* Results List */}
       <div className="flex-1 vibrancy panel-base rounded-xl overflow-hidden flex flex-col animate-slide-down origin-top">
           <div className="flex-1 overflow-y-auto p-2 min-h-0">
             {results.length === 0 ? (
@@ -155,8 +220,6 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                 results.map((item, index) => {
                     const isSelected = index === selectedIndex;
                     const isExpanded = item.id === expandedId;
-                    // If any item is expanded, should we hide others? No, user said "in the list... in expanded view".
-                    // Implies list stays.
                     
                     return (
                     <div 
@@ -170,22 +233,36 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                                 setIsCopied(false);
                             }}
                     >
-                            <div className="flex justify-between items-start">
-                                <div className={`text-xs font-medium flex-1 ${isExpanded ? 'text-txt-primary whitespace-pre-wrap' : 'text-txt-secondary truncate'}`}>
+                        <div className="flex justify-between items-start">
+                            <div className={`text-xs font-medium flex-1 ${isExpanded ? 'text-txt-primary whitespace-pre-wrap' : 'text-txt-secondary truncate'}`}>
                                 {item.text}
                             </div>
-                                <span className="text-[10px] text-txt-tertiary whitespace-nowrap ml-2 shrink-0 pt-0.5">
+                            <span className="text-[10px] text-txt-tertiary whitespace-nowrap ml-2 shrink-0 pt-0.5">
                                 {item.timestamp}
                             </span>
                         </div>
+                        
+                        {/* --- FIXED IMAGE RENDERING --- */}
+                        {item.screenshotPath && screenshotDir && isExpanded && (
+                            <div className="mt-2 w-full aspect-video rounded-lg overflow-hidden border border-black/10 dark:border-white/10 shadow-sm">
+                                <ImageThumbnail 
+                                    dir={screenshotDir} 
+                                    path={item.screenshotPath} 
+                                    className="w-full h-full object-cover"
+                                />
+                            </div>
+                        )}
+                        {/* ----------------------------- */}
+                        
                     </div>
                     );
                 })
             )}
           </div>
-          {/* Footer */}
           <div className="px-4 py-2 border-t border-glass-border flex items-center justify-between bg-black/5 dark:bg-black/20 text-xs font-medium shrink-0">
-             <span className="text-txt-tertiary">{results.length} items</span>
+             <span className="text-txt-tertiary">
+                 {isSuggested ? '✨ Suggested' : `${results.length} items`}
+             </span>
              
              {expandedId !== null ? (
                  <div 

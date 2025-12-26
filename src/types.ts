@@ -4,6 +4,7 @@ export type CaptureState = 'recording' | 'review';
 export interface Memory {
     id: string;
     content: string;
+    screenshot_path?: string;
     created_at: string;
 }
 
@@ -16,4 +17,5 @@ export interface MemoryItem {
     id: string;
     text: string;
     timestamp: string;
+    screenshotPath?: string;
 }

@@ -6,6 +6,8 @@ mod db;
 mod embeddings;
 mod whisper;
 mod models;
+mod visuals;
+mod sui;
 mod errors;
 
 #[cfg(test)]
@@ -23,10 +25,14 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(Mutex::new(commands::RecordingState {
             is_recording: false,
             start_time: None,
         }))
+        .manage(commands::VisualState {
+            embedder: Mutex::new(None),
+        })
         .invoke_handler(tauri::generate_handler![
             commands::save_memory,
             commands::search_memories,
@@ -36,7 +42,9 @@ fn main() {
             commands::stop_recording,
             commands::cancel_recording,
             commands::download_models,
-            commands::initialize_app
+            commands::initialize_app,
+            commands::capture_active_window_cmd,
+            commands::get_contextual_suggestions
         ])
         .setup(|app| {
             // ✅ Set to Prohibited early (applicationWillFinishLaunching phase)
@@ -60,10 +68,49 @@ fn main() {
             std::thread::spawn(|| { let _ = embeddings::init_embedder(); });
             if let Err(e) = whisper::init_whisper(app.handle().clone()) { eprintln!("Whisper init error: {}", e); }
             
+            // --- PROACTIVE SUI LOOP ---
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut intent_state = sui::IntentState::default();
+                loop {
+                    std::thread::sleep(Duration::from_secs(2));
+                    
+                    // Capture active window
+                    let result = unsafe { commands::capture_active_window() };
+                    let result_str = result.to_string();
+                    if result_str.starts_with("ERROR:") { continue; }
+                    
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result_str) {
+                        let app_name = parsed["app_name"].as_str().unwrap_or("");
+                        let ocr_text = parsed["ocr"].as_str().unwrap_or("");
+                        
+                        if sui::check_utility_trigger(app_name, ocr_text, &mut intent_state) {
+                            // Check for relevant memories
+                            if let Ok(conn) = db::get_connection() {
+                                let text_query = format!("{} {}", app_name, ocr_text);
+                                if let Ok(text_embedding) = embeddings::generate_embedding(&text_query) {
+                                    if let Ok(matches) = embeddings::search_similar(&conn, &text_embedding, 1) {
+                                        if !matches.is_empty() && matches[0].1 > 0.85 {
+                                            // TRIGGER GLOW
+                                            let _ = app_handle.emit("show-glow", ());
+                                            // Update tray icon to indicate suggestion
+                                            if let Some(tray) = app_handle.tray_by_id("main") {
+                                                // We'll use the search icon as the 'glow' state
+                                                let _ = tray.set_icon(Some(Image::from_path("icons/search.png").unwrap()));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
             let default_icon = app.default_window_icon().unwrap().clone();
             
-            let _tray = TrayIconBuilder::new()
-                .icon(default_icon)
+            let _tray = TrayIconBuilder::with_id("main")
+                .icon(default_icon.clone())
                 .on_tray_icon_event(move |tray, event| {
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
                     
@@ -71,6 +118,9 @@ fn main() {
                         // LEFT CLICK: Capture
                         TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Down, .. } => {
                             let app = tray.app_handle();
+                            // Reset icon on click
+                            let _ = tray.set_icon(Some(app.default_window_icon().unwrap().clone()));
+                            
                             if let Some(window) = app.get_webview_window("panel") {
                                 // 1. Resize (Exact 44px)
                                 let _ = window.set_size(Size::Logical(LogicalSize { width: 320.0, height: 44.0 }));
@@ -88,6 +138,9 @@ fn main() {
                         // RIGHT CLICK: Recall
                         TrayIconEvent::Click { button: MouseButton::Right, button_state: MouseButtonState::Down, .. } => {
                             let app = tray.app_handle();
+                            // Reset icon on click
+                            let _ = tray.set_icon(Some(app.default_window_icon().unwrap().clone()));
+
                             if let Some(window) = app.get_webview_window("panel") {
                                 let _ = window.set_size(Size::Logical(LogicalSize { width: 320.0, height: 280.0 }));
                                 let _ = window.move_window(Position::TrayCenter);

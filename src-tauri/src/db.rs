@@ -59,6 +59,9 @@ pub fn init_db() -> Result<(), Box<dyn std::error::Error>> {
         "CREATE TABLE IF NOT EXISTS memories (
             id TEXT PRIMARY KEY,
             content TEXT NOT NULL,
+            screenshot_path TEXT,
+            ocr_text TEXT,
+            app_name TEXT,
             duration_sec INTEGER,
             context_url TEXT,
             context_note TEXT,
@@ -69,9 +72,12 @@ pub fn init_db() -> Result<(), Box<dyn std::error::Error>> {
         [],
     )?;
 
-    // Create vec_memories virtual table for vector search
-    // Note: sqlite-vec uses vec0 virtual table
-    // If this fails with "no such module: vec0", the extension wasn't registered properly
+    // Ensure v2.0 columns exist (Migration for existing DBs)
+    let _ = conn.execute("ALTER TABLE memories ADD COLUMN screenshot_path TEXT", []);
+    let _ = conn.execute("ALTER TABLE memories ADD COLUMN ocr_text TEXT", []);
+    let _ = conn.execute("ALTER TABLE memories ADD COLUMN app_name TEXT", []);
+
+    // Create vec_memories virtual table for text vector search
     conn.execute(
         "CREATE VIRTUAL TABLE IF NOT EXISTS vec_memories USING vec0(
             embedding float[384]
@@ -79,13 +85,22 @@ pub fn init_db() -> Result<(), Box<dyn std::error::Error>> {
         [],
     )?;
 
-    // Create cleanup trigger for deleted memories
+    // Create vec_visuals virtual table for image vector search (Tiny CLIP is 512)
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS vec_visuals USING vec0(
+            embedding float[512]
+        )",
+        [],
+    )?;
+
+    // Create cleanup trigger for deleted memories (Text)
     conn.execute(
         "CREATE TRIGGER IF NOT EXISTS delete_vector 
         AFTER UPDATE OF is_deleted ON memories 
         WHEN NEW.is_deleted = 1
         BEGIN
           DELETE FROM vec_memories WHERE rowid = NEW.rowid;
+          DELETE FROM vec_visuals WHERE rowid = NEW.rowid;
         END",
         [],
     )?;

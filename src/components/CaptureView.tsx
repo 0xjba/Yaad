@@ -10,7 +10,7 @@ import { KeyboardBadge } from './ui/KeyboardBadge';
 
 interface CaptureViewProps {
   onDiscard: () => void;
-  onSave: (text: string) => void;
+  onSave: (text: string, capture: any) => void;
   state: CaptureState;
   setState: (state: CaptureState) => void;
   onToggleView: () => void;
@@ -26,6 +26,8 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
     handleRetry,
     handleUserEdit,
     updateTranscript,
+    capture,
+    stopRecordingAndSwitchToManual,
   } = useRecording({
     onSave,
     state,
@@ -39,6 +41,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
             if (e.key === 'Enter') {
                 if (error) handleRetry();
                 else handleProcess();
+                return;
             }
             if (e.key === 'Escape') {
                 // Discard and CLOSE window
@@ -46,9 +49,15 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                 import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
                     getCurrentWindow().hide();
                 });
+                return;
+            }
+            
+            // Any other key (character keys) kills mic and starts manual entry
+            if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                stopRecordingAndSwitchToManual();
             }
         } else if (state === 'review') {
-            if (e.key === 'Enter' && !e.shiftKey) onSave(transcript);
+            if (e.key === 'Enter' && !e.shiftKey) onSave(transcript, capture);
             if (e.key === 'Escape') onDiscard();
         }
     };
@@ -138,14 +147,23 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
         <>
             <div className="h-3 shrink-0"></div>
             <div className="flex-1 vibrancy panel-base rounded-xl flex flex-col animate-slide-down origin-top overflow-hidden relative">
-                <div className="flex-1 p-4 overflow-hidden flex flex-col">
+                <div className="flex-1 p-4 overflow-hidden flex gap-4">
+                    {capture?.image && (
+                        <div className="w-24 h-24 rounded-lg overflow-hidden border border-white/10 shrink-0 shadow-lg">
+                            <img 
+                                src={`data:image/png;base64,${capture.image}`} 
+                                alt="Active Window" 
+                                className="w-full h-full object-cover"
+                            />
+                        </div>
+                    )}
                     <textarea
                         value={transcript}
                         onChange={(e) => updateTranscript(e.target.value)}
                         onFocus={handleUserEdit} // 🚨 Stop timer on click
                         className="flex-1 w-full bg-transparent resize-none outline-none text-txt-primary text-sm leading-relaxed placeholder-txt-tertiary font-normal"
-                        placeholder="Transcript..."
-                        autoFocus={false} // Don't steal focus immediately so timer can run
+                        placeholder="Type your thought..."
+                        autoFocus={isEditing} // Focus if we switched via typing
                     />
                 </div>
                 {/* Footer */}
@@ -155,7 +173,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({ onDiscard, onSave, sta
                             <span>Discard</span> <KeyboardBadge>Esc</KeyboardBadge>
                         </button>
                         <div className="w-px h-3 bg-black/10 dark:bg-white/10 mx-1"></div>
-                        <button onClick={() => onSave(transcript)} className="flex items-center gap-2 group cursor-pointer text-txt-secondary hover:text-txt-primary">
+                        <button onClick={() => onSave(transcript, capture)} className="flex items-center gap-2 group cursor-pointer text-txt-secondary hover:text-txt-primary">
                             <span>Save</span> <KeyboardBadge>↵</KeyboardBadge>
                         </button>
                     </div>

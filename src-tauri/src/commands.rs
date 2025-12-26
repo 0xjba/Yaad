@@ -1,17 +1,20 @@
 use crate::db;
 use crate::embeddings;
 use crate::models;
-use crate::errors::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::{State, Manager, Emitter};
 use uuid::Uuid;
+use swift_rs::{SRString, swift};
+
+swift!(pub fn capture_active_window() -> SRString);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Memory {
     pub id: String,
     pub content: String,
+    pub screenshot_path: Option<String>,
     pub duration_sec: Option<i32>,
     pub context_url: Option<String>,
     pub context_note: Option<String>,
@@ -31,13 +34,23 @@ pub struct RecordingState {
     pub start_time: Option<std::time::Instant>,
 }
 
+pub struct VisualState {
+    pub embedder: Mutex<Option<crate::visuals::VisualEmbedder>>,
+}
+
 #[tauri::command]
 pub async fn save_memory(
+    app_handle: tauri::AppHandle,
     content: String,
+    ocr_text: Option<String>,
+    app_name: Option<String>,
+    screenshot: Option<String>, // Base64
     duration_sec: Option<i32>,
     context_url: Option<String>,
     context_note: Option<String>,
+    visual_state: State<'_, VisualState>,
 ) -> Result<String, String> {
+    println!("save_memory called with content length: {}", content.len());
     // Validate input
     if content.trim().is_empty() {
         return Err("Memory content cannot be empty".to_string());
@@ -58,6 +71,33 @@ pub async fn save_memory(
     }
 
     let id = Uuid::new_v4().to_string();
+    let mut saved_screenshot_path: Option<String> = None;
+    
+    // Decode screenshot early if provided, as we need it for both disk and embedding
+    let mut decoded_img: Option<image::DynamicImage> = None;
+    if let Some(base64_img) = &screenshot {
+        println!("Screenshot provided, length: {}", base64_img.len());
+        if let Some(img_bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, base64_img).ok() {
+            println!("Screenshot decoded successfully, bytes: {}", img_bytes.len());
+            // 1. Save to Disk
+            if let Ok(app_dir) = app_handle.path().app_local_data_dir() {
+                let screenshots_dir = app_dir.join("screenshots");
+                if !screenshots_dir.exists() {
+                    let _ = std::fs::create_dir_all(&screenshots_dir);
+                }
+                let filename = format!("{}.jpg", id);
+                let file_path = screenshots_dir.join(&filename);
+                if std::fs::write(&file_path, &img_bytes).is_ok() {
+                    saved_screenshot_path = Some(filename);
+                    println!("Screenshot saved to: {:?}", file_path);
+                } else {
+                    eprintln!("Failed to write screenshot to disk");
+                }
+            }
+            // 2. Load for embedding
+            decoded_img = image::load_from_memory(&img_bytes).ok();
+        }
+    }
     
     // Retry database connection on failure
     let conn = db::get_connection()
@@ -75,11 +115,12 @@ pub async fn save_memory(
 
     // Insert into memories table with retry
     conn.execute(
-        "INSERT INTO memories (id, content, duration_sec, context_url, context_note) 
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![id, content, duration_sec, context_url, context_note],
+        "INSERT INTO memories (id, content, screenshot_path, ocr_text, app_name, duration_sec, context_url, context_note) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![id, content, saved_screenshot_path, ocr_text, app_name, duration_sec, context_url, context_note],
     )
     .map_err(|e| {
+        eprintln!("Database insert failed: {}", e);
         if e.to_string().contains("UNIQUE") {
             "Memory with this ID already exists".to_string()
         } else if e.to_string().contains("database") || e.to_string().contains("locked") {
@@ -96,6 +137,31 @@ pub async fn save_memory(
     embeddings::store_embedding(&conn, rowid, &embedding)
         .map_err(|e| format!("Failed to store embedding: {}", e))?;
 
+    // Generate and store visual embedding if screenshot was decoded
+    if let Some(img) = decoded_img {
+        let mut embedder_lock = visual_state.embedder.lock().map_err(|e| e.to_string())?;
+        if embedder_lock.is_none() {
+            let models_dir = crate::models::get_models_dir().map_err(|e| e.to_string())?;
+            let clip_path = models_dir.join(crate::models::CLIP_MODEL_FILENAME);
+            if clip_path.exists() {
+                *embedder_lock = Some(crate::visuals::VisualEmbedder::new(&clip_path).map_err(|e| e.to_string())?);
+            }
+        }
+        
+        if let Some(embedder) = embedder_lock.as_ref() {
+            if let Ok(visual_embedding) = embedder.generate_embedding(img) {
+                let vec_embedding: Vec<f32> = visual_embedding;
+                // Store in vec_visuals
+                let blob = bytemuck::cast_slice::<f32, u8>(&vec_embedding);
+                conn.execute(
+                    "INSERT INTO vec_visuals (rowid, embedding) VALUES (?1, ?2)",
+                    rusqlite::params![rowid, blob],
+                ).map_err(|e| format!("Failed to store visual embedding: {}", e))?;
+            }
+        }
+    }
+
+    println!("Memory saved successfully with id: {}", id);
     Ok(id)
 }
 
@@ -127,7 +193,7 @@ pub async fn search_memories(query: String, limit: i32) -> Result<Vec<SearchResu
     let query_placeholders = rowids.join(",");
     
     let sql = format!(
-        "SELECT rowid, id, content, duration_sec, context_url, context_note, created_at 
+        "SELECT rowid, id, content, screenshot_path, duration_sec, context_url, context_note, created_at 
          FROM memories 
          WHERE rowid IN ({}) AND is_deleted = 0",
         query_placeholders
@@ -143,10 +209,11 @@ pub async fn search_memories(query: String, limit: i32) -> Result<Vec<SearchResu
             Memory {
                 id: row.get(1)?,
                 content: row.get(2)?,
-                duration_sec: row.get(3)?,
-                context_url: row.get(4)?,
-                context_note: row.get(5)?,
-                created_at: row.get(6)?,
+                screenshot_path: row.get(3)?,
+                duration_sec: row.get(4)?,
+                context_url: row.get(5)?,
+                context_note: row.get(6)?,
+                created_at: row.get(7)?,
             }
         ))
     })
@@ -171,17 +238,18 @@ pub async fn get_memory(id: String) -> Result<Memory, String> {
 
     let memory = conn
         .query_row(
-            "SELECT id, content, duration_sec, context_url, context_note, created_at 
+            "SELECT id, content, screenshot_path, duration_sec, context_url, context_note, created_at 
              FROM memories WHERE id = ?1 AND is_deleted = 0",
             [id],
             |row| {
                 Ok(Memory {
                     id: row.get(0)?,
                     content: row.get(1)?,
-                    duration_sec: row.get(2)?,
-                    context_url: row.get(3)?,
-                    context_note: row.get(4)?,
-                    created_at: row.get(5)?,
+                    screenshot_path: row.get(2)?,
+                    duration_sec: row.get(3)?,
+                    context_url: row.get(4)?,
+                    context_note: row.get(5)?,
+                    created_at: row.get(6)?,
                 })
             },
         )
@@ -201,6 +269,105 @@ pub async fn delete_memory(id: String) -> Result<(), String> {
     .map_err(|e| format!("Failed to delete memory: {}", e))?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_contextual_suggestions(
+    visual_state: State<'_, VisualState>,
+) -> Result<Vec<SearchResult>, String> {
+    // 1. Capture current window
+    let result = unsafe { capture_active_window() };
+    let result_str = result.to_string();
+    if result_str.starts_with("ERROR:") {
+        return Err(result_str);
+    }
+    
+    let parsed: serde_json::Value = serde_json::from_str(&result_str).map_err(|e| e.to_string())?;
+    let screenshot_base64 = parsed["image"].as_str().ok_or("No image in capture")?;
+    let app_name = parsed["app_name"].as_str().unwrap_or("");
+    let ocr_text = parsed["ocr"].as_str().unwrap_or("");
+
+    let conn = db::get_connection().map_err(|e| e.to_string())?;
+    let mut all_results = Vec::new();
+
+    // 2. Visual search
+    if let Some(img_bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, screenshot_base64).ok() {
+        if let Ok(img) = image::load_from_memory(&img_bytes) {
+            let mut embedder_lock = visual_state.embedder.lock().map_err(|e| e.to_string())?;
+            if embedder_lock.is_none() {
+                let models_dir = crate::models::get_models_dir().map_err(|e| e.to_string())?;
+                let clip_path = models_dir.join(crate::models::CLIP_MODEL_FILENAME);
+                if clip_path.exists() {
+                    *embedder_lock = Some(crate::visuals::VisualEmbedder::new(&clip_path).map_err(|e| e.to_string())?);
+                }
+            }
+            
+            if let Some(embedder) = embedder_lock.as_ref() {
+                if let Ok(visual_embedding) = embedder.generate_embedding(img) {
+                    let vec_embedding: Vec<f32> = visual_embedding;
+                    let blob = bytemuck::cast_slice::<f32, u8>(&vec_embedding);
+                    let mut stmt = conn.prepare(
+                        "SELECT rowid, distance FROM vec_visuals WHERE embedding MATCH ?1 ORDER BY distance LIMIT 5"
+                    ).map_err(|e| e.to_string())?;
+                    
+                    let matches = stmt.query_map([blob], |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, f32>(1)?))
+                    }).map_err(|e| e.to_string())?;
+
+                    for m in matches {
+                        if let Ok((rowid, distance)) = m {
+                            // Convert distance to similarity (1.0 - distance for normalized vectors)
+                            let similarity = 1.0 - distance;
+                            if similarity > 0.7 {
+                                if let Ok(memory) = fetch_memory_by_rowid(&conn, rowid) {
+                                    all_results.push(SearchResult { memory, similarity });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. OCR/App Name text search (Passive)
+    let text_query = format!("{} {}", app_name, ocr_text);
+    if !text_query.trim().is_empty() {
+        let text_embedding = crate::embeddings::generate_embedding(&text_query).map_err(|e| e.to_string())?;
+        let matches = crate::embeddings::search_similar(&conn, &text_embedding, 5).map_err(|e| e.to_string())?;
+        for (rowid, similarity) in matches {
+            if similarity > 0.75 {
+                if let Ok(memory) = fetch_memory_by_rowid(&conn, rowid) {
+                    all_results.push(SearchResult { memory, similarity });
+                }
+            }
+        }
+    }
+
+    // Sort and unique
+    all_results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    all_results.dedup_by(|a, b| a.memory.id == b.memory.id);
+
+    Ok(all_results.into_iter().take(5).collect())
+}
+
+fn fetch_memory_by_rowid(conn: &rusqlite::Connection, rowid: i64) -> Result<Memory, rusqlite::Error> {
+    conn.query_row(
+        "SELECT id, content, screenshot_path, duration_sec, context_url, context_note, created_at 
+         FROM memories WHERE rowid = ?1 AND is_deleted = 0",
+        [rowid],
+        |row| {
+            Ok(Memory {
+                id: row.get(0)?,
+                content: row.get(1)?,
+                screenshot_path: row.get(2)?,
+                duration_sec: row.get(3)?,
+                context_url: row.get(4)?,
+                context_note: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        },
+    )
 }
 
 #[tauri::command]
@@ -268,7 +435,16 @@ pub async fn download_models() -> Result<(), String> {
         .map_err(|e| format!("Failed to download models: {}", e))
 }
 
-/// Zero-Click Auto-Initialization: Check and download models with progress tracking
+#[tauri::command]
+pub async fn capture_active_window_cmd() -> Result<String, String> {
+    let result = unsafe { capture_active_window() };
+    let result_str = result.to_string();
+    if result_str.starts_with("ERROR:") {
+        return Err(result_str);
+    }
+    Ok(result_str)
+}
+
 #[tauri::command]
 pub async fn initialize_app(
     app_handle: tauri::AppHandle,
@@ -290,106 +466,29 @@ pub async fn initialize_app(
     std::fs::create_dir_all(&models_dir)
         .map_err(|e| format!("Failed to create models directory: {}", e))?;
     
-    let model_path = models_dir.join(models::WHISPER_MODEL_FILENAME);
+    let whisper_path = models_dir.join(models::WHISPER_MODEL_FILENAME);
+    let clip_path = models_dir.join(models::CLIP_MODEL_FILENAME);
     
     // PHASE 1: Check for file existence
-    if !model_path.exists() {
-        
-        // Spawn download in background so we can return immediately
+    if !whisper_path.exists() || !clip_path.exists() {
+        // Spawn download in background
         let window_clone = window.clone();
         let app_handle_clone = app_handle.clone();
-        let model_path_clone = model_path.clone();
         
         tauri::async_runtime::spawn(async move {
-            // Download the model
-            // Convert error to String immediately for thread safety
-            let result = models::download_file_with_progress(
-                models::WHISPER_MODEL_URL,
-                &model_path_clone,
-                &app_handle_clone,
-            ).await.map_err(|e| e.to_string());
-            
-            match result {
-                Ok(()) => {
-                    // Verify integrity after download
-                    let is_corrupt = match crate::whisper::verify_model_integrity(&model_path_clone) {
-                        Ok(valid) => !valid,
-                        Err(_) => true,
-                    };
-                    
-                    if is_corrupt {
-                        let _ = std::fs::remove_file(&model_path_clone);
-                        // Re-download (this will emit progress events again)
-                        let re_download_result = models::download_file_with_progress(
-                            models::WHISPER_MODEL_URL,
-                            &model_path_clone,
-                            &app_handle_clone,
-                        ).await.map_err(|e| e.to_string());
-                        
-                        if let Err(e) = re_download_result {
-                            let _ = window_clone.emit("initialization-error", e);
-                            return;
-                        }
-                        // Verify again after re-download
-                        let is_still_corrupt = match crate::whisper::verify_model_integrity(&model_path_clone) {
-                            Ok(valid) => !valid,
-                            Err(_) => true,
-                        };
-                        if is_still_corrupt {
-                            let _ = window_clone.emit("initialization-error", "Model verification failed after re-download".to_string());
-                            return;
-                        }
-                    }
-                    
-                    let _ = window_clone.emit("initialization-complete", ());
-                }
-                Err(e) => {
-                    let _ = window_clone.emit("initialization-error", e);
+            let models_to_download = [
+                (models::WHISPER_MODEL_URL, models::WHISPER_MODEL_FILENAME),
+                (models::CLIP_MODEL_URL, models::CLIP_MODEL_FILENAME),
+            ];
+
+            for (url, filename) in models_to_download {
+                let dest_path = app_handle_clone.path().app_local_data_dir().unwrap().join("models").join(filename);
+                if !dest_path.exists() {
+                    let _ = models::download_file_with_progress(url, &dest_path, &app_handle_clone).await;
                 }
             }
-        });
-        
-        // Return immediately so frontend knows download is in progress
-        return Ok("downloading".to_string());
-    }
-    
-    // PHASE 2: Verify Integrity (Try to Load)
-    // Attempt to load the model - if this fails, the file is corrupt
-    let is_corrupt = match crate::whisper::verify_model_integrity(&model_path) {
-        Ok(valid) => !valid,
-        Err(_) => true,
-    };
-    
-    if is_corrupt {
-        // Try to delete corrupt file, but don't fail if it doesn't exist
-        let _ = std::fs::remove_file(&model_path);
-        
-        // Spawn re-download in background
-        let window_clone = window.clone();
-        let app_handle_clone = app_handle.clone();
-        let model_path_clone = model_path.clone();
-        
-        tauri::async_runtime::spawn(async move {
-            let re_download_result = models::download_file_with_progress(
-                models::WHISPER_MODEL_URL,
-                &model_path_clone,
-                &app_handle_clone,
-            ).await.map_err(|e| e.to_string());
             
-            if let Err(e) = re_download_result {
-                let _ = window_clone.emit("initialization-error", e);
-                return;
-            }
-            // Verify after re-download
-            let is_still_corrupt = match crate::whisper::verify_model_integrity(&model_path_clone) {
-                Ok(valid) => !valid,
-                Err(_) => true,
-            };
-            if is_still_corrupt {
-                let _ = window_clone.emit("initialization-error", "Model verification failed after re-download".to_string());
-            } else {
-                let _ = window_clone.emit("initialization-complete", ());
-            }
+            let _ = window_clone.emit("initialization-complete", ());
         });
         
         return Ok("downloading".to_string());

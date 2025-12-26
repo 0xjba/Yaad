@@ -3,13 +3,20 @@ import { invoke } from '@tauri-apps/api/core';
 import { CaptureState } from '../types';
 
 interface UseRecordingOptions {
-  onSave: (text: string) => void;
+  onSave: (text: string, capture: VisualCapture | null) => void;
   state: CaptureState;
   setState: (state: CaptureState) => void;
 }
 
+export interface VisualCapture {
+  image: string;
+  ocr: string;
+  app_name: string;
+}
+
 export const useRecording = ({ onSave, state, setState }: UseRecordingOptions) => {
   const [transcript, setTranscript] = useState('');
+  const [capture, setCapture] = useState<VisualCapture | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +31,21 @@ export const useRecording = ({ onSave, state, setState }: UseRecordingOptions) =
         console.error("Start recording failed:", err);
         setError("Mic not found");
       });
+
+      // Capture active window screenshot
+      invoke<string>('capture_active_window_cmd')
+        .then(json => {
+          try {
+            const parsed = JSON.parse(json);
+            setCapture(parsed);
+          } catch (e) {
+            console.error("Failed to parse capture JSON:", e);
+          }
+        })
+        .catch(err => {
+          console.error("Capture failed:", err);
+        });
+
       setIsEditing(false);
       setError(null);
     }
@@ -88,7 +110,7 @@ export const useRecording = ({ onSave, state, setState }: UseRecordingOptions) =
     // Only run if in review mode and user hasn't clicked to edit
     if (state === 'review' && !isEditing && transcript) {
       autosaveTimerRef.current = window.setTimeout(() => {
-        onSave(transcript);
+        onSave(transcript, capture);
       }, 10000); // 10 seconds
     } else {
       // If editing or state changes, clear the timer
@@ -101,7 +123,7 @@ export const useRecording = ({ onSave, state, setState }: UseRecordingOptions) =
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     };
-  }, [state, isEditing, onSave, transcript]);
+  }, [state, isEditing, onSave, transcript, capture]);
 
   // Handle User Interaction (Stops Auto-Save)
   const handleUserEdit = () => {
@@ -109,6 +131,19 @@ export const useRecording = ({ onSave, state, setState }: UseRecordingOptions) =
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
+    }
+  };
+
+  const stopRecordingAndSwitchToManual = async () => {
+    if (state === 'recording') {
+        try {
+            await invoke('cancel_recording');
+            setState('review');
+            setIsEditing(true);
+            setTranscript('');
+        } catch (err) {
+            console.error("Failed to cancel recording:", err);
+        }
     }
   };
 
@@ -135,5 +170,7 @@ export const useRecording = ({ onSave, state, setState }: UseRecordingOptions) =
     handleUserEdit,
     updateTranscript,
     reset,
+    capture,
+    stopRecordingAndSwitchToManual,
   };
 };

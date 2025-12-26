@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
@@ -80,13 +80,32 @@ export default function App() {
   const handleToggleView = () => {
       if (view === 'recall') {
           setCaptureState('recording');
-          invoke('cancel_recording').catch(() => {});
+          invoke('cancel_recording').catch(console.error);
           setView('capture');
           setCaptureSessionId(id => id + 1);
       } else {
           setView('recall');
       }
   };
+
+  const handleSave = useCallback(async (text: string, capture: any) => {
+    try {
+        console.log("Saving memory...", { text, hasCapture: !!capture });
+        await invoke('save_memory', { 
+            content: text, 
+            ocrText: capture?.ocr || null,
+            appName: capture?.app_name || null,
+            screenshot: capture?.image || null,
+            durationSec: null, 
+            contextUrl: null, 
+            contextNote: null 
+        });
+        setView('recall');
+    } catch (err) {
+        console.error("Save failed:", err);
+        alert("Save failed: " + err);
+    }
+  }, []);
 
   // Render Nothing if view is unknown
   if (!view) return null;
@@ -117,15 +136,7 @@ export default function App() {
                         invoke('cancel_recording').catch(() => {});
                         setView('recall');
                     }} 
-                    onSave={async (text) => {
-                        await invoke('save_memory', { 
-                            content: text, 
-                            durationSec: null, 
-                            contextUrl: null, 
-                            contextNote: null 
-                        });
-                        setView('recall');
-                    }}
+                    onSave={handleSave}
                     onToggleView={handleToggleView}
                 />
             )}

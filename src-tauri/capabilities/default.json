@@ -14,6 +14,11 @@
     "core:window:allow-center",
     "positioner:allow-move-window",
     "shell:allow-open",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "fs:allow-read-file",
+    {
+      "identifier": "fs:scope",
+      "allow": ["$APPLOCALDATA/screenshots/*"]
+    }
   ]
 }
