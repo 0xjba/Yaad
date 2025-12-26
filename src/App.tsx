@@ -17,7 +17,6 @@ export default function App() {
   }, []);
 
   // --- RESIZER LOGIC ---
-  // Replaced setTimeout with useLayoutEffect to prevent ghost windows
   useLayoutEffect(() => {
     if (!view) return;
 
@@ -32,7 +31,6 @@ export default function App() {
       }
 
       try {
-        // Immediate resize request
         await appWindow.setSize(new LogicalSize(WINDOW_WIDTH, targetHeight));
       } catch (e) {
         console.error("Resize error:", e);
@@ -55,12 +53,8 @@ export default function App() {
       }
     });
     
-    // Handle window blur (user clicks outside)
     const unlistenBlur = listen('window-blur', () => {
-        // Discard recording if it was in progress
         invoke('cancel_recording').catch(() => {});
-        // Reset state so next open starts fresh
-        setCaptureState('recording'); 
     });
 
     return () => { 
@@ -76,7 +70,6 @@ export default function App() {
     }
   }, [view]);
 
-  // Reset Logic
   const handleToggleView = () => {
       if (view === 'recall') {
           setCaptureState('recording');
@@ -88,9 +81,16 @@ export default function App() {
       }
   };
 
+  // --- FIXED SAVE HANDLER ---
   const handleSave = useCallback(async (text: string, capture: any) => {
+    // 1. Optimistic Hide: Close immediately for snappy UX
+    const win = getCurrentWindow();
+    await win.hide();
+
     try {
         console.log("Saving memory...", { text, hasCapture: !!capture });
+        
+        // 2. Process in Background (Window is already hidden)
         await invoke('save_memory', { 
             content: text, 
             ocrText: capture?.ocr || null,
@@ -100,14 +100,16 @@ export default function App() {
             contextUrl: null, 
             contextNote: null 
         });
+
+        // 3. Reset View for next time
         setView('recall');
     } catch (err) {
         console.error("Save failed:", err);
-        alert("Save failed: " + err);
+        // Note: We don't alert() here because the window is hidden.
+        // Failing silently (logging) is better than a zombie window.
     }
   }, []);
 
-  // Render Nothing if view is unknown
   if (!view) return null;
 
   const contentHeightClass = (() => {
@@ -132,8 +134,9 @@ export default function App() {
                     key={captureSessionId}
                     state={captureState}
                     setState={setCaptureState}
-                    onDiscard={() => {
+                    onDiscard={async () => {
                         invoke('cancel_recording').catch(() => {});
+                        await getCurrentWindow().hide();
                         setView('recall');
                     }} 
                     onSave={handleSave}
