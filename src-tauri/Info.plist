@@ -4,6 +4,8 @@
 <dict>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Yaad needs access to your screen to capture active windows for your memories.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Yaad needs to query your browser for the current URL to provide contextual suggestions.</string>
 
     <key>CFBundleDevelopmentRegion</key>
     <string>English</string>

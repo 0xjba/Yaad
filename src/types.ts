@@ -5,6 +5,7 @@ export interface Memory {
     id: string;
     content: string;
     screenshot_path?: string;
+    context_url?: string;
     created_at: string;
 }
 
@@ -18,4 +19,5 @@ export interface MemoryItem {
     text: string;
     timestamp: string;
     screenshotPath?: string;
+    url?: string;
 }

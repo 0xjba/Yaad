@@ -12,6 +12,7 @@ export interface VisualCapture {
   image: string;
   ocr: string;
   app_name: string;
+  url: string;
 }
 
 export const useRecording = ({ onSave, state, setState }: UseRecordingOptions) => {

@@ -97,7 +97,7 @@ export default function App() {
             appName: capture?.app_name || null,
             screenshot: capture?.image || null,
             durationSec: null, 
-            contextUrl: null, 
+            contextUrl: capture?.url || null, 
             contextNote: null 
         });
 

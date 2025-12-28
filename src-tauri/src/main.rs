@@ -16,6 +16,7 @@ mod tests;
 use std::sync::Mutex;
 use std::{thread, time::Duration};
 use tauri::{Manager, Emitter, WindowEvent, Size, LogicalSize};
+use tauri::path::BaseDirectory;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::image::Image;
 use tauri_plugin_positioner::{Position, WindowExt};
@@ -72,6 +73,13 @@ fn main() {
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut intent_state = sui::IntentState::default();
+                
+                // 1. Resolve Icon Path SAFELY (Do not unwrap inside loop)
+                // This looks for "icons/search.png" in the "resources" folder we defined in tauri.conf.json
+                let search_icon_path = app_handle.path()
+                    .resolve("icons/search.png", BaseDirectory::Resource)
+                    .unwrap_or_else(|_| std::path::PathBuf::from("icons/search.png"));
+
                 loop {
                     std::thread::sleep(Duration::from_secs(2));
                     
@@ -83,20 +91,26 @@ fn main() {
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result_str) {
                         let app_name = parsed["app_name"].as_str().unwrap_or("");
                         let ocr_text = parsed["ocr"].as_str().unwrap_or("");
+                        let title = parsed["title"].as_str().unwrap_or("");
+                        let url = parsed["url"].as_str().unwrap_or("");
                         
-                        if sui::check_utility_trigger(app_name, ocr_text, &mut intent_state) {
+                        if sui::check_utility_trigger(title, app_name, url, ocr_text, &mut intent_state) {
                             // Check for relevant memories
                             if let Ok(conn) = db::get_connection() {
-                                let text_query = format!("{} {}", app_name, ocr_text);
+                                let text_query = format!("{} {} {} {}", title, app_name, url, ocr_text);
                                 if let Ok(text_embedding) = embeddings::generate_embedding(&text_query) {
                                     if let Ok(matches) = embeddings::search_similar(&conn, &text_embedding, 1) {
                                         if !matches.is_empty() && matches[0].1 > 0.85 {
                                             // TRIGGER GLOW
                                             let _ = app_handle.emit("show-glow", ());
-                                            // Update tray icon to indicate suggestion
+                                            
+                                            // Update tray icon SAFELY
                                             if let Some(tray) = app_handle.tray_by_id("main") {
-                                                // We'll use the search icon as the 'glow' state
-                                                let _ = tray.set_icon(Some(Image::from_path("icons/search.png").unwrap()));
+                                                if let Ok(icon) = Image::from_path(&search_icon_path) {
+                                                    let _ = tray.set_icon(Some(icon));
+                                                } else {
+                                                    eprintln!("Warning: Failed to load icon from {:?}", search_icon_path);
+                                                }
                                             }
                                         }
                                     }

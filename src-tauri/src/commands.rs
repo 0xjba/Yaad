@@ -286,6 +286,7 @@ pub async fn get_contextual_suggestions(
     let screenshot_base64 = parsed["image"].as_str().ok_or("No image in capture")?;
     let app_name = parsed["app_name"].as_str().unwrap_or("");
     let ocr_text = parsed["ocr"].as_str().unwrap_or("");
+    let url = parsed["url"].as_str().unwrap_or("");
 
     let conn = db::get_connection().map_err(|e| e.to_string())?;
     let mut all_results = Vec::new();
@@ -330,8 +331,8 @@ pub async fn get_contextual_suggestions(
         }
     }
 
-    // 3. OCR/App Name text search (Passive)
-    let text_query = format!("{} {}", app_name, ocr_text);
+    // 3. OCR/App Name/URL text search (Passive)
+    let text_query = format!("{} {} {}", app_name, url, ocr_text);
     if !text_query.trim().is_empty() {
         let text_embedding = crate::embeddings::generate_embedding(&text_query).map_err(|e| e.to_string())?;
         let matches = crate::embeddings::search_similar(&conn, &text_embedding, 5).map_err(|e| e.to_string())?;

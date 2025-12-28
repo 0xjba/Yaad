@@ -20,7 +20,7 @@ impl Default for IntentState {
     }
 }
 
-pub fn check_utility_trigger(app_name: &str, ocr_text: &str, state: &mut IntentState) -> bool {
+pub fn check_utility_trigger(title: &str, app_name: &str, url: &str, ocr_text: &str, state: &mut IntentState) -> bool {
     let regex = TRANSACTIONAL_REGEX.get_or_init(|| {
         Regex::new(r"(?i)checkout|billing|cart|pricing|buy|payment|subscribe|order|receipt").unwrap()
     });
@@ -32,8 +32,11 @@ pub fn check_utility_trigger(app_name: &str, ocr_text: &str, state: &mut IntentS
         }
     }
 
-    // 2. Score based on App Name and OCR
-    let is_transactional = regex.is_match(app_name) || regex.is_match(ocr_text);
+    // 2. Score based on TITLE (High Signal), URL, App Name, and OCR
+    let is_transactional = regex.is_match(title) || 
+                           regex.is_match(url) || 
+                           regex.is_match(app_name) || 
+                           regex.is_match(ocr_text);
     
     if !is_transactional {
         state.confirmation_start = None;

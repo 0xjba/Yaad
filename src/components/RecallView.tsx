@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Copy, Check } from 'lucide-react';
+import { Search, Plus, Copy, Check, ExternalLink, Globe } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { appLocalDataDir, join } from '@tauri-apps/api/path';
 import { readFile } from '@tauri-apps/plugin-fs'; // <--- Critical Import
@@ -75,12 +75,13 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
         invoke<SearchResult[]>('get_contextual_suggestions')
             .then(raw => {
                 if (raw.length > 0) {
-                    const mapped: MemoryItem[] = raw.map((r) => ({
-                        id: r.memory.id.toString(),
-                        text: r.memory.content,
-                        timestamp: formatDistanceToNow(new Date(r.memory.created_at), { addSuffix: true }).replace('about ', ''),
-                        screenshotPath: r.memory.screenshot_path,
-                    }));
+                                const mapped: MemoryItem[] = raw.map((r) => ({
+                                    id: r.memory.id.toString(),
+                                    text: r.memory.content,
+                                    timestamp: formatDistanceToNow(new Date(r.memory.created_at), { addSuffix: true }).replace('about ', ''),
+                                    screenshotPath: r.memory.screenshot_path,
+                                    url: r.memory.context_url,
+                                }));
                     setResults(mapped);
                     setIsSuggested(true);
                 }
@@ -107,6 +108,7 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                 text: r.memory.content,
                 timestamp: formatDistanceToNow(new Date(r.memory.created_at), { addSuffix: true }).replace('about ', ''),
                 screenshotPath: r.memory.screenshot_path,
+                url: r.memory.context_url,
             }));
             setResults(mapped);
             setSelectedIndex(0);
@@ -242,7 +244,22 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                             </span>
                         </div>
                         
-                        {/* --- FIXED IMAGE RENDERING --- */}
+                                    {/* --- URL DISPLAY --- */}
+                                    {item.url && isExpanded && (
+                                        <div 
+                                            className="mt-2 flex items-center gap-2 text-[10px] text-txt-tertiary hover:text-txt-secondary transition-colors group/url"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                invoke('plugin:shell|open', { path: item.url });
+                                            }}
+                                        >
+                                            <Globe size={10} className="shrink-0" />
+                                            <span className="truncate flex-1">{item.url}</span>
+                                            <ExternalLink size={10} className="opacity-0 group-hover/url:opacity-100 transition-opacity shrink-0" />
+                                        </div>
+                                    )}
+
+                                    {/* --- FIXED IMAGE RENDERING --- */}
                         {item.screenshotPath && screenshotDir && isExpanded && (
                             <div className="mt-2 w-full aspect-video rounded-lg overflow-hidden border border-black/10 dark:border-white/10 shadow-sm">
                                 <ImageThumbnail 
