@@ -2,6 +2,76 @@ import SwiftRs
 import ScreenCaptureKit
 import Vision
 import AppKit
+import ApplicationServices
+
+// 1. Define a lightweight struct for JSON serialization
+struct MetadataResult: Encodable {
+    let app_name: String
+    let title: String
+    let url: String
+    let error: String?
+}
+
+@_cdecl("fetch_metadata_only")
+public func fetch_metadata_only() -> SRString {
+    var appName = "Unknown"
+    var windowTitle = ""
+    var url = ""
+    
+    // A. Get Frontmost Application
+    if let frontApp = NSWorkspace.shared.frontmostApplication {
+        appName = frontApp.localizedName ?? "Unknown"
+        
+        // B. Get Window Title via Accessibility API (AXUIElement)
+        let appRef = AXUIElementCreateApplication(frontApp.processIdentifier)
+        var focusedWindow: AnyObject?
+        
+        // Get the focused window of the app
+        let result = AXUIElementCopyAttributeValue(appRef, kAXFocusedWindowAttribute as CFString, &focusedWindow)
+        
+        if result == .success, let window = focusedWindow {
+            let windowRef = window as! AXUIElement
+            var titleRef: AnyObject?
+            // Get the title of that window
+            let titleResult = AXUIElementCopyAttributeValue(windowRef, kAXTitleAttribute as CFString, &titleRef)
+            if titleResult == .success, let titleStr = titleRef as? String {
+                windowTitle = titleStr
+            }
+        }
+    }
+    
+    // C. Get Browser URL (Reuse your existing logic)
+    // Only fetch if it's a known browser to save resources
+    let browsers = ["Google Chrome", "Safari", "Arc", "Brave Browser", "Microsoft Edge", "Orion"]
+    if browsers.contains(appName) {
+        url = getBrowserURL(appName: appName)
+    }
+    
+    // D. Serialize
+    let metadata = MetadataResult(
+        app_name: appName,
+        title: windowTitle,
+        url: url,
+        error: nil
+    )
+    
+    do {
+        let jsonData = try JSONEncoder().encode(metadata)
+        if let jsonString = String(data: jsonData, encoding: .utf8) {
+            return SRString(jsonString)
+        }
+    } catch {
+        return SRString("{\"error\": \"JSON Encoding Failed\"}")
+    }
+    
+    return SRString("{\"error\": \"Unknown Failure\"}")
+}
+
+// NEW: Permission Check
+@_cdecl("check_accessibility_permissions")
+public func check_accessibility_permissions() -> Bool {
+    return AXIsProcessTrusted()
+}
 
 @_cdecl("capture_active_window")
 public func capture_active_window() -> SRString {

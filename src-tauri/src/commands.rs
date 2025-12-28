@@ -8,7 +8,11 @@ use tauri::{State, Manager, Emitter};
 use uuid::Uuid;
 use swift_rs::{SRString, swift};
 
-swift!(pub fn capture_active_window() -> SRString);
+swift!(
+    pub fn capture_active_window() -> SRString;
+    pub fn fetch_metadata_only() -> SRString;
+    pub fn check_accessibility_permissions() -> bool;
+);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Memory {
@@ -36,6 +40,13 @@ pub struct RecordingState {
 
 pub struct VisualState {
     pub embedder: Mutex<Option<crate::visuals::VisualEmbedder>>,
+}
+
+// NEW COMMAND: Allow frontend to check if we have permissions
+#[tauri::command]
+pub async fn check_permissions() -> Result<bool, String> {
+    let granted = unsafe { check_accessibility_permissions() };
+    Ok(granted)
 }
 
 #[tauri::command]

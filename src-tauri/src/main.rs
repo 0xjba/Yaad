@@ -45,7 +45,8 @@ fn main() {
             commands::download_models,
             commands::initialize_app,
             commands::capture_active_window_cmd,
-            commands::get_contextual_suggestions
+            commands::get_contextual_suggestions,
+            commands::check_permissions
         ])
         .setup(|app| {
             // ✅ Set to Prohibited early (applicationWillFinishLaunching phase)
@@ -69,57 +70,46 @@ fn main() {
             std::thread::spawn(|| { let _ = embeddings::init_embedder(); });
             if let Err(e) = whisper::init_whisper(app.handle().clone()) { eprintln!("Whisper init error: {}", e); }
             
-            // --- PROACTIVE SUI LOOP ---
+            // --- NEW: LIGHTWEIGHT SUI LOOP ---
             let app_handle = app.handle().clone();
-            std::thread::spawn(move || {
+            let search_icon_path = app_handle.path()
+                .resolve("icons/search.png", BaseDirectory::Resource)
+                .unwrap_or_else(|_| std::path::PathBuf::from("icons/search.png"));
+
+            tauri::async_runtime::spawn(async move {
                 let mut intent_state = sui::IntentState::default();
                 
-                // 1. Resolve Icon Path SAFELY (Do not unwrap inside loop)
-                // This looks for "icons/search.png" in the "resources" folder we defined in tauri.conf.json
-                let search_icon_path = app_handle.path()
-                    .resolve("icons/search.png", BaseDirectory::Resource)
-                    .unwrap_or_else(|_| std::path::PathBuf::from("icons/search.png"));
-
                 loop {
-                    std::thread::sleep(Duration::from_secs(2));
-                    
-                    // Capture active window
-                    let result = unsafe { commands::capture_active_window() };
-                    let result_str = result.to_string();
-                    if result_str.starts_with("ERROR:") { continue; }
-                    
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result_str) {
-                        let app_name = parsed["app_name"].as_str().unwrap_or("");
-                        let ocr_text = parsed["ocr"].as_str().unwrap_or("");
-                        let title = parsed["title"].as_str().unwrap_or("");
-                        let url = parsed["url"].as_str().unwrap_or("");
+                    // 1. Fetch Metadata (Fast, Low CPU)
+                    let raw_json = unsafe { commands::fetch_metadata_only() };
+                    let json_str = raw_json.as_str();
+
+                    if let Ok(metadata) = serde_json::from_str::<sui::WindowMetadata>(json_str) {
                         
-                        if sui::check_utility_trigger(title, app_name, url, ocr_text, &mut intent_state) {
-                            // Check for relevant memories
-                            if let Ok(conn) = db::get_connection() {
-                                let text_query = format!("{} {} {} {}", title, app_name, url, ocr_text);
-                                if let Ok(text_embedding) = embeddings::generate_embedding(&text_query) {
-                                    if let Ok(matches) = embeddings::search_similar(&conn, &text_embedding, 1) {
-                                        if !matches.is_empty() && matches[0].1 > 0.85 {
-                                            // TRIGGER GLOW
-                                            let _ = app_handle.emit("show-glow", ());
-                                            
-                                            // Update tray icon SAFELY
-                                            if let Some(tray) = app_handle.tray_by_id("main") {
-                                                if let Ok(icon) = Image::from_path(&search_icon_path) {
-                                                    let _ = tray.set_icon(Some(icon));
-                                                } else {
-                                                    eprintln!("Warning: Failed to load icon from {:?}", search_icon_path);
-                                                }
-                                            }
-                                        }
-                                    }
+                        // 2. Decide
+                        let decision = sui::process_metadata_trigger(&metadata, &mut intent_state);
+                        
+                        if decision == sui::TriggerDecision::Activate {
+                            // 3. Trigger Action
+                            // Optional: Check DB for embeddings here if you want to be extra sure
+                            // For now, we trust the metadata + temporal confirmation
+                            
+                            let _ = app_handle.emit("show-glow", ());
+                            
+                            // Update Tray
+                            if let Some(tray) = app_handle.tray_by_id("main") {
+                                if let Ok(icon) = Image::from_path(&search_icon_path) {
+                                    let _ = tray.set_icon(Some(icon));
                                 }
                             }
                         }
                     }
+                    
+                    // Sleep 1s
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });
+            // ---------------------------------
 
             let default_icon = app.default_window_icon().unwrap().clone();
             
