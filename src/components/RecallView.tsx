@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Copy, Check, ExternalLink, Globe } from 'lucide-react';
+import { Search, Plus, Copy, Check, ExternalLink, Globe, Eye, Monitor } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { appLocalDataDir, join } from '@tauri-apps/api/path';
 import { readFile } from '@tauri-apps/plugin-fs'; // <--- Critical Import
@@ -14,6 +14,30 @@ interface RecallViewProps {
   onEscape: () => void;
   onToggleView: () => void;
 }
+
+// --- HELPER: Extract Snippet ---
+// Only returns text if the query matches something in the OCR
+const getContextSnippet = (text: string | undefined, query: string): string | null => {
+    if (!text || !query.trim()) return null;
+    
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const index = lowerText.indexOf(lowerQuery);
+    
+    if (index === -1) return null;
+    
+    // Grab 20 chars before and 40 chars after
+    let start = Math.max(0, index - 20);
+    let end = Math.min(text.length, index + query.length + 40);
+    
+    let snippet = text.slice(start, end).trim();
+    
+    // Add ellipses
+    if (start > 0) snippet = "..." + snippet;
+    if (end < text.length) snippet = snippet + "...";
+    
+    return snippet;
+};
 
 // --- NEW COMPONENT: Safely loads images using the FS plugin ---
 const ImageThumbnail = ({ 
@@ -81,6 +105,8 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                                     timestamp: formatDistanceToNow(new Date(r.memory.created_at), { addSuffix: true }).replace('about ', ''),
                                     screenshotPath: r.memory.screenshot_path,
                                     url: r.memory.context_url,
+                                    appName: r.memory.app_name,
+                                    ocrText: r.memory.ocr_text,
                                 }));
                     setResults(mapped);
                     setIsSuggested(true);
@@ -109,6 +135,8 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                 timestamp: formatDistanceToNow(new Date(r.memory.created_at), { addSuffix: true }).replace('about ', ''),
                 screenshotPath: r.memory.screenshot_path,
                 url: r.memory.context_url,
+                appName: r.memory.app_name,
+                ocrText: r.memory.ocr_text,
             }));
             setResults(mapped);
             setSelectedIndex(0);
@@ -223,6 +251,9 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                     const isSelected = index === selectedIndex;
                     const isExpanded = item.id === expandedId;
                     
+                    // CALCULATE SNIPPET HERE (Only show if expanded + matches)
+                    const snippet = isExpanded ? getContextSnippet(item.ocrText, query) : null;
+
                     return (
                     <div 
                         key={item.id}
@@ -244,8 +275,29 @@ export const RecallView: React.FC<RecallViewProps> = ({ onEscape, onToggleView }
                             </span>
                         </div>
                         
-                                    {/* --- URL DISPLAY --- */}
-                                    {item.url && isExpanded && (
+                        {/* --- NEW: METATAGS SECTION (App Name + Snippet) --- */}
+                        {isExpanded && (item.appName || snippet) && (
+                            <div className="mt-2 flex flex-wrap gap-2 animate-slide-down">
+                                {/* App Name Bubble */}
+                                {item.appName && (
+                                    <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-black/5 dark:bg-white/10 text-txt-secondary border border-black/5 dark:border-white/5">
+                                        <Monitor size={10} className="opacity-70" />
+                                        {item.appName}
+                                    </div>
+                                )}
+                                {/* Snippet Bubble (Only if match found) */}
+                                {snippet && (
+                                    <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium bg-black/5 dark:bg-white/10 text-txt-secondary border border-black/5 dark:border-white/5" title="Matched text on screen">
+                                        <Eye size={10} className="opacity-70" />
+                                        <span>"{snippet}"</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {/* -------------------------------------------------- */}
+                        
+                        {/* --- URL DISPLAY --- */}
+                        {item.url && isExpanded && (
                                         <div 
                                             className="mt-2 flex items-center gap-2 text-[10px] text-txt-tertiary hover:text-txt-secondary transition-colors group/url"
                                             onClick={(e) => {

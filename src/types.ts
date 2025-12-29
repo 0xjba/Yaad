@@ -7,6 +7,8 @@ export interface Memory {
     screenshot_path?: string;
     context_url?: string;
     created_at: string;
+    ocr_text?: string;
+    app_name?: string;
 }
 
 export interface SearchResult {
@@ -20,4 +22,6 @@ export interface MemoryItem {
     timestamp: string;
     screenshotPath?: string;
     url?: string;
+    ocrText?: string;
+    appName?: string;
 }

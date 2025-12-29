@@ -6,13 +6,15 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::{State, Manager, Emitter};
 use uuid::Uuid;
-use swift_rs::{SRString, swift};
+use swift_rs::{SRString, swift, Bool};
 
-swift!(
-    pub fn capture_active_window() -> SRString;
-    pub fn fetch_metadata_only() -> SRString;
-    pub fn check_accessibility_permissions() -> bool;
-);
+swift!( fn capture_active_window() -> SRString );
+swift!( fn fetch_metadata_only() -> SRString );
+swift!( fn check_accessibility_permissions() -> Bool );
+
+pub unsafe fn fetch_metadata_public() -> SRString {
+    fetch_metadata_only()
+}
 
 const RRF_K: f32 = 60.0; // Standard constant for Reciprocal Rank Fusion
 
@@ -270,9 +272,9 @@ pub async fn search_memories(query: String, limit: i32) -> Result<Vec<SearchResu
     sorted_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     
     // Take top N
-    let top_ids: Vec<String> = sorted_scores.into_iter()
+    let top_ids: Vec<String> = sorted_scores.iter()
         .take(limit as usize)
-        .map(|(id, _score)| id)
+        .map(|(id, _score)| id.clone())
         .collect();
 
     // Bulk Fetch Data

@@ -81,29 +81,31 @@ fn main() {
                 
                 loop {
                     // 1. Fetch Metadata (Fast, Low CPU)
-                    let raw_json = unsafe { commands::fetch_metadata_only() };
-                    let json_str = raw_json.as_str();
+                    {
+                        let raw_json = unsafe { commands::fetch_metadata_public() };
+                        let json_str = raw_json.as_str();
 
-                    if let Ok(metadata) = serde_json::from_str::<sui::WindowMetadata>(json_str) {
-                        
-                        // 2. Decide
-                        let decision = sui::process_metadata_trigger(&metadata, &mut intent_state);
-                        
-                        if decision == sui::TriggerDecision::Activate {
-                            // 3. Trigger Action
-                            // Optional: Check DB for embeddings here if you want to be extra sure
-                            // For now, we trust the metadata + temporal confirmation
+                        if let Ok(metadata) = serde_json::from_str::<sui::WindowMetadata>(json_str) {
                             
-                            let _ = app_handle.emit("show-glow", ());
+                            // 2. Decide
+                            let decision = sui::process_metadata_trigger(&metadata, &mut intent_state);
                             
-                            // Update Tray
-                            if let Some(tray) = app_handle.tray_by_id("main") {
-                                if let Ok(icon) = Image::from_path(&search_icon_path) {
-                                    let _ = tray.set_icon(Some(icon));
+                            if decision == sui::TriggerDecision::Activate {
+                                // 3. Trigger Action
+                                // Optional: Check DB for embeddings here if you want to be extra sure
+                                // For now, we trust the metadata + temporal confirmation
+                                
+                                let _ = app_handle.emit("show-glow", ());
+                                
+                                // Update Tray
+                                if let Some(tray) = app_handle.tray_by_id("main") {
+                                    if let Ok(icon) = Image::from_path(&search_icon_path) {
+                                        let _ = tray.set_icon(Some(icon));
+                                    }
                                 }
                             }
                         }
-                    }
+                    } // raw_json dropped here
                     
                     // Sleep 1s
                     tokio::time::sleep(Duration::from_secs(1)).await;

@@ -5,7 +5,7 @@ use cpal::SampleFormat;
 use rubato::{FftFixedIn, Resampler};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext};
 
