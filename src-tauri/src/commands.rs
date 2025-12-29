@@ -14,11 +14,15 @@ swift!(
     pub fn check_accessibility_permissions() -> bool;
 );
 
+const RRF_K: f32 = 60.0; // Standard constant for Reciprocal Rank Fusion
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Memory {
     pub id: String,
     pub content: String,
     pub screenshot_path: Option<String>,
+    pub ocr_text: Option<String>,
+    pub app_name: Option<String>,
     pub duration_sec: Option<i32>,
     pub context_url: Option<String>,
     pub context_note: Option<String>,
@@ -176,69 +180,150 @@ pub async fn save_memory(
     Ok(id)
 }
 
+fn search_fts(conn: &rusqlite::Connection, query: &str, limit: i32) -> Result<Vec<String>, String> {
+    // Sanitize query for FTS5 (basic sanitization)
+    let sanitized = query.replace("\"", "").replace("'", "");
+    // Use prefix query for better UX (e.g., "inv" matches "invoice")
+    let fts_query = format!("{}*", sanitized); 
+
+    let mut stmt = conn.prepare(
+        "SELECT id FROM memories_fts 
+         WHERE memories_fts MATCH ?1 
+         ORDER BY rank 
+         LIMIT ?2"
+    ).map_err(|e| e.to_string())?;
+
+    let ids = stmt.query_map(rusqlite::params![fts_query, limit], |row| {
+        row.get::<_, String>(0)
+    }).map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for id in ids {
+        if let Ok(id_str) = id {
+            result.push(id_str);
+        }
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 pub async fn search_memories(query: String, limit: i32) -> Result<Vec<SearchResult>, String> {
     let conn = db::get_connection().map_err(|e| e.to_string())?;
-
-    // Generate embedding for query
-    let query_embedding = embeddings::generate_embedding(&query)
-        .map_err(|e| format!("Failed to generate query embedding: {}", e))?;
-
-    // Search for similar memories
-    let matches = embeddings::search_similar(&conn, &query_embedding, limit)
-        .map_err(|e| format!("Failed to search memories: {}", e))?;
-
-    // Retrieve full memory data for each match
-    let mut results = Vec::new();
     
-    if matches.is_empty() {
-        return Ok(results);
+    // --- 1. Vector Search (Semantic) ---
+    // Generate embedding
+    let query_embedding = embeddings::generate_embedding(&query)
+        .map_err(|e| format!("Failed to generate embedding: {}", e))?;
+
+    // Search vectors (Get slightly more than limit to allow fusion to work well)
+    let vector_limit = limit * 2; 
+    let vector_matches = embeddings::search_similar(&conn, &query_embedding, vector_limit)
+        .map_err(|e| format!("Vector search failed: {}", e))?;
+
+    // --- 2. FTS Search (Keyword) ---
+    let fts_limit = limit * 2;
+    let fts_ids = search_fts(&conn, &query, fts_limit).unwrap_or_default();
+
+    // --- 3. Reciprocal Rank Fusion (RRF) ---
+    // Map: Memory UUID -> Combined Score
+    let mut scores: HashMap<String, f32> = HashMap::new();
+
+    // Process Vector Results
+    // We need to fetch String IDs for these rowids to match FTS
+    let rowids: Vec<String> = vector_matches.iter().map(|(id, _)| id.to_string()).collect();
+    if !rowids.is_empty() {
+        let placeholders = rowids.join(",");
+        let sql = format!("SELECT rowid, id FROM memories WHERE rowid IN ({})", placeholders);
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let id_map_iter = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        }).map_err(|e| e.to_string())?;
+        
+        let mut rowid_to_uuid = HashMap::new();
+        for item in id_map_iter {
+            if let Ok((rid, uuid)) = item {
+                rowid_to_uuid.insert(rid, uuid);
+            }
+        }
+
+        for (rank, (rowid, _sim)) in vector_matches.iter().enumerate() {
+            if let Some(uuid) = rowid_to_uuid.get(rowid) {
+                let score = 1.0 / (RRF_K + (rank as f32 + 1.0));
+                *scores.entry(uuid.clone()).or_insert(0.0) += score;
+            }
+        }
     }
 
-    // Optimization: Fetch all memories in a single query
-    // 1. Create a temporary map of rowid -> similarity for quick lookup
-    let similarity_map: HashMap<i64, f32> = matches.iter().cloned().collect();
+    // Process FTS Results
+    for (rank, uuid) in fts_ids.iter().enumerate() {
+        let score = 1.0 / (RRF_K + (rank as f32 + 1.0));
+        *scores.entry(uuid.clone()).or_insert(0.0) += score;
+    }
+
+    // --- 4. Fetch & Sort Final Results ---
+    if scores.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Convert scores to vec and sort by score descending
+    let mut sorted_scores: Vec<(String, f32)> = scores.into_iter().collect();
+    sorted_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     
-    // 2. Build comma-separated list of rowids for the IN clause
-    let rowids: Vec<String> = matches.iter().map(|(id, _)| id.to_string()).collect();
-    let query_placeholders = rowids.join(",");
-    
+    // Take top N
+    let top_ids: Vec<String> = sorted_scores.into_iter()
+        .take(limit as usize)
+        .map(|(id, _score)| id)
+        .collect();
+
+    // Bulk Fetch Data
+    let query_placeholders = top_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!(
-        "SELECT rowid, id, content, screenshot_path, duration_sec, context_url, context_note, created_at 
+        "SELECT id, content, screenshot_path, ocr_text, app_name, duration_sec, context_url, context_note, created_at
          FROM memories 
-         WHERE rowid IN ({}) AND is_deleted = 0",
+         WHERE id IN ({}) AND is_deleted = 0",
         query_placeholders
     );
 
-    let mut stmt = conn.prepare(&sql)
-        .map_err(|e| format!("Failed to prepare bulk query: {}", e))?;
-        
-    let memory_rows = stmt.query_map([], |row| {
-        let rowid: i64 = row.get(0)?;
-        Ok((
-            rowid,
-            Memory {
-                id: row.get(1)?,
-                content: row.get(2)?,
-                screenshot_path: row.get(3)?,
-                duration_sec: row.get(4)?,
-                context_url: row.get(5)?,
-                context_note: row.get(6)?,
-                created_at: row.get(7)?,
-            }
-        ))
-    })
-    .map_err(|e| format!("Failed to execute bulk query: {}", e))?;
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let params: Vec<&dyn rusqlite::ToSql> = top_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    
+    let memories_iter = stmt.query_map(params.as_slice(), |row| {
+        Ok(Memory {
+            id: row.get(0)?,
+            content: row.get(1)?,
+            screenshot_path: row.get(2)?,
+            ocr_text: row.get(3)?,
+            app_name: row.get(4)?,
+            duration_sec: row.get(5)?,
+            context_url: row.get(6)?,
+            context_note: row.get(7)?,
+            created_at: row.get(8)?,
+        })
+    }).map_err(|e| e.to_string())?;
 
-    for row in memory_rows {
-        let (rowid, memory) = row.map_err(|e| e.to_string())?;
-        if let Some(&similarity) = similarity_map.get(&rowid) {
-            results.push(SearchResult { memory, similarity });
+    let mut results = Vec::new();
+    for memory_res in memories_iter {
+        if let Ok(memory) = memory_res {
+            // Similarity calculation for UI: We can use the RRF score or normalized version.
+            // For now, let's find the original score.
+            let rrf_score = sorted_scores.iter()
+                .find(|(id, _)| id == &memory.id)
+                .map(|(_, s)| *s)
+                .unwrap_or(0.0);
+                
+            results.push(SearchResult { 
+                memory, 
+                similarity: rrf_score // Frontend might expect 0-1, but RRF is different.
+            });
         }
     }
-    
-    // Re-sort to maintain order (SQL result order is not guaranteed with IN)
-    results.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Resort results to match the RRF order (SQL IN clause does not preserve order)
+    results.sort_by(|a, b| {
+        let pos_a = top_ids.iter().position(|id| id == &a.memory.id).unwrap_or(999);
+        let pos_b = top_ids.iter().position(|id| id == &b.memory.id).unwrap_or(999);
+        pos_a.cmp(&pos_b)
+    });
 
     Ok(results)
 }
@@ -249,7 +334,7 @@ pub async fn get_memory(id: String) -> Result<Memory, String> {
 
     let memory = conn
         .query_row(
-            "SELECT id, content, screenshot_path, duration_sec, context_url, context_note, created_at 
+            "SELECT id, content, screenshot_path, ocr_text, app_name, duration_sec, context_url, context_note, created_at 
              FROM memories WHERE id = ?1 AND is_deleted = 0",
             [id],
             |row| {
@@ -257,10 +342,12 @@ pub async fn get_memory(id: String) -> Result<Memory, String> {
                     id: row.get(0)?,
                     content: row.get(1)?,
                     screenshot_path: row.get(2)?,
-                    duration_sec: row.get(3)?,
-                    context_url: row.get(4)?,
-                    context_note: row.get(5)?,
-                    created_at: row.get(6)?,
+                    ocr_text: row.get(3)?,
+                    app_name: row.get(4)?,
+                    duration_sec: row.get(5)?,
+                    context_url: row.get(6)?,
+                    context_note: row.get(7)?,
+                    created_at: row.get(8)?,
                 })
             },
         )
@@ -365,7 +452,7 @@ pub async fn get_contextual_suggestions(
 
 fn fetch_memory_by_rowid(conn: &rusqlite::Connection, rowid: i64) -> Result<Memory, rusqlite::Error> {
     conn.query_row(
-        "SELECT id, content, screenshot_path, duration_sec, context_url, context_note, created_at 
+        "SELECT id, content, screenshot_path, ocr_text, app_name, duration_sec, context_url, context_note, created_at 
          FROM memories WHERE rowid = ?1 AND is_deleted = 0",
         [rowid],
         |row| {
@@ -373,10 +460,12 @@ fn fetch_memory_by_rowid(conn: &rusqlite::Connection, rowid: i64) -> Result<Memo
                 id: row.get(0)?,
                 content: row.get(1)?,
                 screenshot_path: row.get(2)?,
-                duration_sec: row.get(3)?,
-                context_url: row.get(4)?,
-                context_note: row.get(5)?,
-                created_at: row.get(6)?,
+                ocr_text: row.get(3)?,
+                app_name: row.get(4)?,
+                duration_sec: row.get(5)?,
+                context_url: row.get(6)?,
+                context_note: row.get(7)?,
+                created_at: row.get(8)?,
             })
         },
     )

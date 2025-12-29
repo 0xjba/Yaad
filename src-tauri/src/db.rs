@@ -93,6 +93,64 @@ pub fn init_db() -> Result<(), Box<dyn std::error::Error>> {
         [],
     )?;
 
+    // Create FTS5 Virtual Table for Text Search
+    // We index: content (spoken), ocr_text (screen), app_name, context_note
+    conn.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+            id UNINDEXED, 
+            content, 
+            ocr_text, 
+            app_name, 
+            context_note, 
+            tokenize='porter'
+        )",
+        [],
+    )?;
+
+    // Create Triggers to Auto-Sync 'memories' -> 'memories_fts'
+    // INSERT Trigger
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+            INSERT INTO memories_fts(id, content, ocr_text, app_name, context_note)
+            VALUES (new.id, new.content, new.ocr_text, new.app_name, new.context_note);
+        END;",
+        [],
+    )?;
+
+    // DELETE Trigger
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+            DELETE FROM memories_fts WHERE id = old.id;
+        END;",
+        [],
+    )?;
+
+    // UPDATE Trigger (Handle soft deletes or content updates)
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+            DELETE FROM memories_fts WHERE id = old.id;
+            INSERT INTO memories_fts(id, content, ocr_text, app_name, context_note)
+            VALUES (new.id, new.content, new.ocr_text, new.app_name, new.context_note);
+        END;",
+        [],
+    )?;
+
+    // Backfill / Migration Logic
+    // If the FTS table is empty but memories exist (upgrade scenario), populate it.
+    let count: i64 = conn.query_row(
+        "SELECT count(*) FROM memories_fts", 
+        [], 
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    if count == 0 {
+        let _ = conn.execute(
+            "INSERT INTO memories_fts(id, content, ocr_text, app_name, context_note)
+             SELECT id, content, ocr_text, app_name, context_note FROM memories",
+            []
+        );
+    }
+
     // Create cleanup trigger for deleted memories (Text)
     conn.execute(
         "CREATE TRIGGER IF NOT EXISTS delete_vector 

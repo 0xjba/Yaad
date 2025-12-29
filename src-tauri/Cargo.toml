@@ -29,7 +29,7 @@ regex = "1.11"      # Regex for intent scoring
 # ---------------------------------------
 
 # The Database
-rusqlite = { version = "0.31", features = ["bundled", "uuid"] }
+rusqlite = { version = "0.31", features = ["bundled", "uuid", "modern_sqlite"] }
 # Vector Search
 sqlite-vec = "0.1.7-alpha.2"
 # Embeddings (CPU)
